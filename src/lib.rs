@@ -13,7 +13,7 @@ pub mod prelude {
     pub use crate::types::{Navigable, NavType, NavDebug, NavStatic};
 
     pub use crate::pathfinding::Path;
-    pub use crate::navmesh::{NavMesh};
+    pub use crate::navmesh::{NavMesh, Polygon};
 
     pub use crate::tools::NavRay;
 
