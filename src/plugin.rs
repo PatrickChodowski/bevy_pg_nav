@@ -9,8 +9,6 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use bevy_common_assets::json::JsonAssetPlugin;
 
-use crate::maps::scenes::{MapsData, TerrainChunk};
-
 use crate::functions::{
     find_neighbours, 
     merge_by_groups,
@@ -41,14 +39,24 @@ impl Plugin for PGNavPlugin {
 
 #[derive(Event)]
 pub struct GenerateNavMesh {
+    pub terrain_entity: Entity,
     pub map_name: String,
-    pub chunk_id: String
+    pub chunk_id: String,
+    pub chunk_size: f32
 }
 impl GenerateNavMesh {
-    pub fn new(map_name: &str, chunk_id: &str) -> Self{
+    pub fn new(
+        terrain_entity: Entity,
+        map_name: &str, 
+        chunk_id: &str,
+        chunk_size: f32
+    
+    ) -> Self{
         GenerateNavMesh {
+            terrain_entity,
             map_name: map_name.to_string(), 
-            chunk_id: chunk_id.to_string()
+            chunk_id: chunk_id.to_string(),
+            chunk_size
         }
     }
 }
@@ -58,8 +66,7 @@ fn generate_navmesh(
     mut commands:   Commands,
     meshes:         Res<Assets<Mesh>>,
     mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
-    trmd_query:     Query<(&Transform, &Mesh3d, &TerrainChunk)>,
-    mapsdata:       Res<MapsData>,
+    terrains:       Query<(Entity, &Transform, &Mesh3d)>,
     navconfig:      Res<NavConfig>
 ){
     for ev in events.read(){
@@ -67,15 +74,13 @@ fn generate_navmesh(
         let raycast_step = navconfig.raycast_step as usize;
         let water_height: f32 = navconfig.water_height;
         let extent: f32 = navconfig.raycast_step as f32 * 0.5;
-        let mapdata = mapsdata.get_map(&ev.map_name);
-        let half_chunk_size: f32 = mapdata.chunk_size*0.5;
+        let half_chunk_size: f32 = ev.chunk_size*0.5;
 
         let mut navmesh_done: bool = false;
 
-        for (terrain_transform, mesh3d, terrain_chunk) in trmd_query.iter(){
+        for (terrain_entity, terrain_transform, mesh3d) in terrains.iter(){
 
-            if (terrain_chunk.map_name != ev.map_name) ||
-               (terrain_chunk.chunk_id != ev.chunk_id) {
+            if ev.terrain_entity != terrain_entity {
                 continue;
             } 
 
@@ -140,8 +145,8 @@ fn generate_navmesh(
             commands.insert_resource(navmesh.clone());
 
             if navconfig.serialize {
-                info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", terrain_chunk.map_name, terrain_chunk.chunk_id);
-                let filename = format!("./assets/navmesh/{}_{}.navmesh.json", terrain_chunk.map_name, terrain_chunk.chunk_id);
+                info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", ev.map_name, ev.chunk_id);
+                let filename = format!("./assets/navmesh/{}_{}.navmesh.json", ev.map_name, ev.chunk_id);
                 IoTaskPool::get().spawn(async move {
                     let f = File::create(&filename).ok().unwrap();
                     let mut writer = BufWriter::new(f);
@@ -155,7 +160,7 @@ fn generate_navmesh(
 
         if !navmesh_done {
             // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
-            commands.send_event(GenerateNavMesh::new(&ev.map_name, &ev.chunk_id));
+            commands.send_event(GenerateNavMesh::new(ev.terrain_entity, &ev.map_name, &ev.chunk_id, ev.chunk_size));
         }
     }
 }

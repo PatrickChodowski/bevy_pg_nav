@@ -1,15 +1,16 @@
 use bevy::prelude::{Vec2, Vec3A, Vec3};
+use bevy::math::Ray3d;
 use std::f32::EPSILON;
 
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
-pub(crate) struct Ray {
+pub struct NavRay {
     pub(crate) origin: Vec3A,
     pub(crate) direction: Vec3A,
 }
 
-impl Ray {
-    pub(crate) fn new(origin: Vec3, direction: Vec3) -> Self {
-        Ray {
+impl NavRay {
+    pub fn new(origin: Vec3, direction: Vec3) -> Self {
+        NavRay {
             origin: origin.into(),
             direction: direction.normalize().into(),
         }
@@ -31,17 +32,23 @@ impl Ray {
     pub(crate) fn down(x: f32, z: f32) -> Self {
         let origin = Vec3::new(x, 1000.0, z);
         let dir = Vec3::NEG_Y;
-        Ray {
+        NavRay {
             origin: origin.into(),
             direction: dir.normalize().into(),
         }
     }
 }
 
+impl From<Ray3d> for NavRay {
+    fn from(ray: Ray3d) -> Self {
+        NavRay::new(ray.origin, *ray.direction)
+    }
+}
+
 
 #[inline(always)]
 pub(crate) fn ray_triangle_intersection(
-    ray: &Ray,
+    ray: &NavRay,
     triangle: &[Vec3A; 3]
 ) -> Option<RayHit> {
     raycast_moller_trumbore(ray, triangle)
@@ -68,7 +75,7 @@ impl RayHit {
 
 /// Implementation of the Möller-Trumbore ray-triangle intersection test
 fn raycast_moller_trumbore(
-    ray: &Ray,
+    ray: &NavRay,
     triangle: &[Vec3A; 3]
 ) -> Option<RayHit> {
     // Source: https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
@@ -107,7 +114,6 @@ fn raycast_moller_trumbore(
 
 #[derive(Debug, Clone)]
 pub struct IntersectionData {
-    position: Vec3,
     normal: Vec3,
     distance: f32,
     triangle_index: usize
@@ -115,22 +121,14 @@ pub struct IntersectionData {
 
 impl IntersectionData {
     pub fn new(
-        position: Vec3, 
         normal: Vec3, 
         distance: f32,
         triangle_index: usize) -> Self {
         Self {
-            position,
             normal,
             distance,
             triangle_index
         }
-    }
-
-    /// Get the intersection data's position.
-    #[must_use]
-    pub fn position(&self) -> Vec3 {
-        self.position
     }
 
     /// Get the intersection data's normal.

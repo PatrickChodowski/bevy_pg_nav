@@ -7,7 +7,7 @@ use bevy::render::{
 };
 use bevy::platform::collections::HashMap;
 
-use crate::tools::{Ray, IntersectionData, ray_triangle_intersection};
+use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ impl TerrainRayMeshData {
         return None;
     }
 
-    pub(crate) fn test(&self, ray: &Ray) -> Option<(f32, usize, Vec3)>{      
+    pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
         if let Some(intersection_data) = self.ray_intersection(ray){
             let dist = intersection_data.distance().round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
@@ -237,10 +237,10 @@ impl TerrainRayMeshData {
 
     fn ray_intersection(
         &self, 
-        ray: &Ray
+        ray: &NavRay
     ) -> Option<IntersectionData> {
 
-        let mesh_space_ray = Ray::new(
+        let mesh_space_ray = NavRay::new(
             self.mesh_transform.transform_point3(ray.origin()),
             self.mesh_transform.transform_vector3(ray.direction()),
         );
@@ -254,13 +254,11 @@ impl TerrainRayMeshData {
                 let distance = *ray_hit.distance();
                 // info!("distance: {}", distance);
                 if distance > 0.0 {
-                    let position = mesh_space_ray.position(distance);
                     let u = ray_hit.uv_coords().0;
                     let v = ray_hit.uv_coords().1;
                     let w = 1.0 - u - v;
                     let normal: Vec3 = (tri_normals * u + tri_normals * v + tri_normals * w).into();
                     let intersection = IntersectionData::new(
-                        self.mesh_transform.transform_point3(position),
                         self.mesh_transform.transform_vector3(normal),
                         self.mesh_transform
                             .transform_vector3(mesh_space_ray.direction() * distance)

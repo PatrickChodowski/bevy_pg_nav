@@ -6,7 +6,7 @@ use std::usize;
 use rayon::prelude::*;
 use dashmap::DashMap;
 
-use crate::tools::Ray;
+use crate::tools::NavRay;
 use crate::tools::AABB;
 use crate::types::{NavType, RayMesh, Navigable, RayMeshType, RayMeshShape, QuadAABB, Neighbours, NavQuad, Edge, NavStatic};
 use crate::terrain::TerrainRayMeshData;
@@ -171,7 +171,7 @@ pub(crate) fn raycasts_rain(
               .map(move |(z_index, &z)| (x_index, x, z_index, z)))
               .for_each(|(x_index, x, z_index, z)|{
 
-        let ray: Ray = Ray::down(x as f32, z as f32);
+        let ray: NavRay = NavRay::down(x as f32, z as f32);
 
         // Check against the terrain
         if let Some((terrain_height, group_id, normal)) = trmd.test(&ray){

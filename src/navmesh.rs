@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 use ordered_float::*;
 use serde::{Serialize,Deserialize};
 
-use crate::tools::Ray;
+use crate::tools::NavRay;
 use crate::pathfinding::{PathFinder, Path, SearchStep};
 use crate::types::{NavQuad, Neighbours, QuadAABB, NavType};
 
@@ -287,7 +287,7 @@ impl NavMesh {
         return mapping_by_index;
     }
 
-    pub fn ray_intersection(&self, ray: &Ray) -> Option<(Vec3, f32, usize, NavType)>  {
+    pub fn ray_intersection(&self, ray: &NavRay) -> Option<(Vec3, f32, usize, NavType)>  {
         for (_polygon, polygon) in self.polygons.iter(){
             if let Some((world_pos, _dist, index)) = polygon.ray_intersection(&ray){
                 return Some((world_pos, _dist, index, polygon.typ));
@@ -372,7 +372,7 @@ impl Polygon {
         });
     }
     
-    pub fn ray_intersection(&self, ray: &Ray) -> Option<(Vec3, f32, usize)>  {
+    pub fn ray_intersection(&self, ray: &NavRay) -> Option<(Vec3, f32, usize)>  {
         if let Some(distance) = self.aabb.ray_intersection(ray) {
             if distance > 0.0 {
                 let position = ray.position(distance);

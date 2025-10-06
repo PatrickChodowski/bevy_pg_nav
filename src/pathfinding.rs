@@ -37,9 +37,9 @@ pub struct PathFinder<'m> {
     queue: BinaryHeap<Node>,
     node_buffer: Vec<Node>,
     root_history: HashMap<Root, f32>,
-    pub from: Vec2,
+    // pub from: Vec2,
     pub to: Vec2,
-    pub polygon_from: usize,
+    // pub polygon_from: usize,
     pub polygon_to: usize,
     pub navmesh: &'m NavMesh,
     blockers: Vec<NavType>
@@ -47,6 +47,7 @@ pub struct PathFinder<'m> {
 
 
 impl<'m> PathFinder<'m> {
+    #[allow(dead_code)]
     pub fn best(&self) -> Option<&Node> {
         for n in self.queue.iter(){
             return Some(n);
@@ -75,9 +76,9 @@ impl<'m> PathFinder<'m> {
             queue: BinaryHeap::with_capacity(15),
             node_buffer: Vec::with_capacity(10),
             root_history: HashMap::default(),
-            from: from.0,
+            // from: from.0,
             to: to.0,
-            polygon_from: from.1,
+            // polygon_from: from.1,
             polygon_to: to.1,
             navmesh,
             blockers: path_blockers.clone()

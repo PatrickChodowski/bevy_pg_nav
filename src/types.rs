@@ -6,7 +6,7 @@ use bevy::color::palettes::tailwind::{PURPLE_500, BLUE_500, GREEN_200, GREEN_500
 use serde::{Serialize, Deserialize};
 use std::cmp::Ordering;
 
-use crate::tools::Ray;
+use crate::tools::NavRay;
 use crate::tools::AABB;
 
 use crate::plugin::NavConfig;
@@ -90,7 +90,7 @@ pub(crate) struct RayMesh {
 }
 impl RayMesh {
 
-    pub(crate) fn test(&self, ray: &Ray) -> Option<(f32, NavType)> {
+    pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, NavType)> {
         match &self.shape {    
 
             RayMeshShape::Circle((loc, radius, height)) => {
@@ -383,9 +383,9 @@ impl Default for QuadAABB {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Edge {
-    Top,
+    // Top,
     Bottom,
-    Left,
+    // Left,
     Right
 }
 
@@ -424,16 +424,6 @@ impl QuadAABB {
         ];
     }
 
-
-    fn default_big() -> Self {
-        let mut aabb = QuadAABB::default();
-        aabb.max_x = f32::MIN;
-        aabb.min_x = f32::MAX;
-        aabb.max_z = f32::MIN;
-        aabb.min_z = f32::MAX;
-        return aabb;
-    }
-
     pub fn has_point(&self, loc: Vec2) -> bool {
         loc.x >= self.min_x && loc.x <= self.max_x && loc.y >= self.min_z && loc.y <= self.max_z
     }
@@ -454,15 +444,15 @@ impl QuadAABB {
         ];
     }
 
-    fn normal(&self) -> Vec3A {
-        let e1 = self.max_x_min_z - self.min_x_min_z;
-        let e2 = self.min_x_max_z - self.min_x_min_z;
-        let normal = e1.cross(e2).normalize();
-        return normal;
-    }
+    // fn normal(&self) -> Vec3A {
+    //     let e1 = self.max_x_min_z - self.min_x_min_z;
+    //     let e2 = self.min_x_max_z - self.min_x_min_z;
+    //     let normal = e1.cross(e2).normalize();
+    //     return normal;
+    // }
 
 
-    pub fn ray_intersection(&self, ray: &Ray) -> Option<f32> {
+    pub fn ray_intersection(&self, ray: &NavRay) -> Option<f32> {
 
         let min_corner = self.min_x_min_z;
         let max_corner = self.max_x_max_z;
@@ -505,25 +495,25 @@ impl QuadAABB {
         return (edges, corners);
     }
 
-    #[inline(always)]
-    fn top(&self) -> [(f32, f32); 2]{
-        return [(self.min_x, self.min_z), (self.max_x, self.min_z)];
-    }
+    // #[inline(always)]
+    // fn top(&self) -> [(f32, f32); 2]{
+    //     return [(self.min_x, self.min_z), (self.max_x, self.min_z)];
+    // }
 
-    #[inline(always)]
-    fn bottom(&self) -> [(f32, f32); 2]{
-        return [(self.min_x, self.max_z), (self.max_x, self.max_z)];
-    }
+    // #[inline(always)]
+    // fn bottom(&self) -> [(f32, f32); 2]{
+    //     return [(self.min_x, self.max_z), (self.max_x, self.max_z)];
+    // }
 
-    #[inline(always)]
-    fn left(&self) -> [(f32, f32); 2]{
-        return [(self.min_x, self.min_z), (self.min_x, self.max_z)];
-    }
+    // #[inline(always)]
+    // fn left(&self) -> [(f32, f32); 2]{
+    //     return [(self.min_x, self.min_z), (self.min_x, self.max_z)];
+    // }
 
-    #[inline(always)]
-    fn right(&self) -> [(f32, f32); 2]{
-        return [(self.max_x, self.min_z), (self.max_x, self.max_z)];
-    }
+    // #[inline(always)]
+    // fn right(&self) -> [(f32, f32); 2]{
+    //     return [(self.max_x, self.min_z), (self.max_x, self.max_z)];
+    // }
 
     #[inline(always)]
     fn top_u32(&self) -> [(u32, u32); 2]{
@@ -545,9 +535,7 @@ impl QuadAABB {
         return [(self.max_x as u32, self.min_z as u32), (self.max_x as u32, self.max_z as u32)];
     }
 
-
-
-    #[inline(always)]
+    #[allow(dead_code)]
     fn edges_u32(&self) -> [[(u32, u32); 2]; 4] {
         [
             self.top_u32(),
@@ -570,18 +558,18 @@ impl QuadAABB {
                     return Some(edge)
                 }
             }
-            Edge::Top => {
-                let edge = self.top_u32();
-                if edge == other.bottom_u32() {
-                    return Some(edge)
-                }
-            }
-            Edge::Left => {
-                let edge = self.left_u32();
-                if edge == other.right_u32() {
-                    return Some(edge)
-                }  
-            }
+            // Edge::Top => {
+            //     let edge = self.top_u32();
+            //     if edge == other.bottom_u32() {
+            //         return Some(edge)
+            //     }
+            // }
+            // Edge::Left => {
+            //     let edge = self.left_u32();
+            //     if edge == other.right_u32() {
+            //         return Some(edge)
+            //     }  
+            // }
             Edge::Right => {
                 let edge = self.right_u32();
                 if edge == other.left_u32() {
@@ -593,7 +581,7 @@ impl QuadAABB {
         return None;
     }
 
-
+    #[allow(dead_code)]
     pub(crate) fn get_identical_edge(&self, other: &QuadAABB) -> Option<[(u32, u32);2]> {
         for [a0, a1] in self.edges_u32() {
             for [b0, b1] in other.edges_u32() {
@@ -605,7 +593,7 @@ impl QuadAABB {
         return None;
     }
 
-
+    #[allow(dead_code)]
     fn from_vertices(vertices: Vec<Vec3A>) -> Self {
         let mut min_x = f32::MAX;
         let mut max_x = f32::MIN;
