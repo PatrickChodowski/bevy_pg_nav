@@ -1,0 +1,22 @@
+[package]
+name = "bevy_pg_nav"
+version = "1.16.0"
+edition = "2024"
+description = "PG (PatchGames) Navigation to be used with Bevy"
+license = "MIT OR Apache-2.0"
+
+[features]
+
+
+[dependencies]
+bevy = {version = "0.16", default-features = false, features = [
+    "bevy_asset",
+    "bevy_log",
+    "bevy_render",
+    "bevy_window"
+]}
+serde = "1.0"
+serde_json = "1.0"
+libm = "0.2.11"
+bevy_common_assets = {version = "0.13.0", default-features = false, features = ["json", "toml"]}
+

@@ -1,0 +1,7 @@
+raycast_step=10
+blocker_scale = 1.2
+adjust_y = 1.0
+offset_y = 0.5
+iter_count_limit=20
+serialize=true
+debug=false
