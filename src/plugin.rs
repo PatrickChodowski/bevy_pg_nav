@@ -39,21 +39,21 @@ impl Plugin for PGNavPlugin {
 
 #[derive(Event)]
 pub struct GenerateNavMesh {
-    pub terrain_entity: Entity,
+    pub name: String,
     pub map_name: String,
     pub chunk_id: String,
     pub chunk_size: f32
 }
 impl GenerateNavMesh {
     pub fn new(
-        terrain_entity: Entity,
+        name: String,
         map_name: &str, 
         chunk_id: &str,
         chunk_size: f32
     
     ) -> Self{
         GenerateNavMesh {
-            terrain_entity,
+            name,
             map_name: map_name.to_string(), 
             chunk_id: chunk_id.to_string(),
             chunk_size
@@ -66,7 +66,7 @@ fn generate_navmesh(
     mut commands:   Commands,
     meshes:         Res<Assets<Mesh>>,
     mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
-    terrains:       Query<(Entity, &Transform, &Mesh3d)>,
+    terrains:       Query<(&Transform, &Mesh3d, &Name)>,
     navconfig:      Res<NavConfig>
 ){
     for ev in events.read(){
@@ -78,9 +78,9 @@ fn generate_navmesh(
 
         let mut navmesh_done: bool = false;
 
-        for (terrain_entity, terrain_transform, mesh3d) in terrains.iter(){
+        for (terrain_transform, mesh3d, terrain_name) in terrains.iter(){
 
-            if ev.terrain_entity != terrain_entity {
+            if ev.name != terrain_name.to_string() {
                 continue;
             } 
 
@@ -160,7 +160,7 @@ fn generate_navmesh(
 
         if !navmesh_done {
             // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
-            commands.send_event(GenerateNavMesh::new(ev.terrain_entity, &ev.map_name, &ev.chunk_id, ev.chunk_size));
+            commands.send_event(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
         }
     }
 }
