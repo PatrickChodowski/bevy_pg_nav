@@ -11,6 +11,10 @@ use crate::tools::AABB;
 
 use crate::plugin::NavConfig;
 
+
+#[derive(Component)]
+pub struct NavStatic;
+
 #[derive(Resource)]
 pub struct NavDebug {
     pub hit_quad_id:   Option<usize>

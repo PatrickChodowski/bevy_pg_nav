@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use bevy_common_assets::json::JsonAssetPlugin;
 
-use crate::maps::scenes::{MapsData, Static, TerrainChunk};
+use crate::maps::scenes::{MapsData, TerrainChunk};
 
 use crate::functions::{
     find_neighbours, 
@@ -20,7 +20,7 @@ use crate::functions::{
 };
 
 use crate::terrain::TerrainRayMeshData;
-use crate::types::{RayMesh, NavQuad, Navigable, NavDebug};
+use crate::types::{RayMesh, NavQuad, Navigable, NavDebug, NavStatic};
 use crate::navmesh::NavMesh;
 
 pub struct PGNavPlugin;
@@ -57,16 +57,15 @@ fn generate_navmesh(
     mut events:     EventReader<GenerateNavMesh>,
     mut commands:   Commands,
     meshes:         Res<Assets<Mesh>>,
-    mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<Static>>,
+    mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
     trmd_query:     Query<(&Transform, &Mesh3d, &TerrainChunk)>,
     mapsdata:       Res<MapsData>,
-    navconfig:      Res<NavConfig>,
-    settings:       Res<Settings>
+    navconfig:      Res<NavConfig>
 ){
     for ev in events.read(){
 
         let raycast_step = navconfig.raycast_step as usize;
-        let water_height: f32 = settings.water_height as f32;
+        let water_height: f32 = navconfig.water_height;
         let extent: f32 = navconfig.raycast_step as f32 * 0.5;
         let mapdata = mapsdata.get_map(&ev.map_name);
         let half_chunk_size: f32 = mapdata.chunk_size*0.5;
@@ -178,6 +177,7 @@ fn debug(
     Resource, Serialize, Deserialize, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Clone,
 )]
 pub struct NavConfig{
+    pub water_height: f32,
     pub raycast_step: u32,
     pub blocker_scale: f32,
     pub adjust_y: f32,
@@ -189,6 +189,7 @@ pub struct NavConfig{
 impl Default for NavConfig {
     fn default() -> Self {
         NavConfig{
+            water_height: 180.0,
             raycast_step: 10,
             blocker_scale: 1.5,
             adjust_y: 1.0,

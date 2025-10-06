@@ -8,10 +8,7 @@ use dashmap::DashMap;
 
 use crate::tools::Ray;
 use crate::tools::AABB;
-use crate::maps::scenes::Static;
-
-
-use crate::types::{NavType, RayMesh, Navigable, RayMeshType, RayMeshShape, QuadAABB, Neighbours, NavQuad, Edge};
+use crate::types::{NavType, RayMesh, Navigable, RayMeshType, RayMeshShape, QuadAABB, Neighbours, NavQuad, Edge, NavStatic};
 use crate::terrain::TerrainRayMeshData;
 use crate::plugin::NavConfig;
 
@@ -239,7 +236,7 @@ pub(crate) fn raycasts_rain(
 
 
 pub(crate) fn get_ray_meshes(
-    mesh_query:     &Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<Static>>,
+    mesh_query:     &Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
     navconfig:      &Res<NavConfig>
 ) -> Vec<RayMesh>{
 
