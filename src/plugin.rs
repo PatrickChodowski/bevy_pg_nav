@@ -166,13 +166,15 @@ fn generate_navmesh(
 }
 
 fn debug(
-    nav_mesh:   Res<NavMesh>,
+    navmesh:    Option<Res<NavMesh>>,
     mut gizmos: Gizmos,
     nav_config: Res<NavConfig>
 ){
-    if nav_config.debug {
-        for (_k, polygon) in nav_mesh.polygons.iter(){
-            polygon.display(&mut gizmos, false, nav_config.offset_y);
+    if let Some(navmesh) = navmesh {
+        if nav_config.debug {
+            for (_k, polygon) in navmesh.polygons.iter(){
+                polygon.display(&mut gizmos, false, nav_config.offset_y);
+            }
         }
     }
 }
