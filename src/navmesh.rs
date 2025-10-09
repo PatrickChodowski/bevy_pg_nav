@@ -11,6 +11,7 @@ use crate::tools::NavRay;
 use crate::pathfinding::{PathFinder, Path, SearchStep};
 use crate::types::{NavQuad, Neighbours, QuadAABB, NavType};
 
+const ORIGIN_HEIGHT: f32 = 1000.0;
 const VERTEX_SIMILARITY_THRESHOLD: f32 = 1.0;
 
 #[derive(Resource, Clone, Debug, Serialize, Deserialize, bevy::asset::Asset, bevy::reflect::TypePath)]
@@ -300,6 +301,34 @@ impl NavMesh {
     //     self.polygons.clear();
     //     self.vertices.clear();
     // }
+
+
+    pub fn get_polygon_height(
+        &self, 
+        loc:          Vec2,
+        water_height: f32
+    ) -> Option<(&Polygon, f32)> {
+
+        if let Some(poly) = self.has_point(loc){
+            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
+            let ray = NavRay::new(origin, Vec3::NEG_Y);
+
+            if let Some((_pos, dist, _index)) = poly.ray_intersection(&ray){
+                let dist = dist.round() as i32;
+                let height: i32 = ORIGIN_HEIGHT as i32 - dist;
+
+                if poly.typ == NavType::Water {
+                    return Some((poly, water_height))
+                } else {
+                    return Some((poly, height as f32));
+                }
+            }
+        }
+
+        return None;
+    }
+
+
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
