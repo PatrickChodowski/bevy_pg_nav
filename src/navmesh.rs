@@ -322,6 +322,9 @@ impl NavMesh {
                 } else {
                     return Some((poly, height as f32));
                 }
+            } else {
+                // TODO solve this
+                warn!("Navmesh ray calculation went wrong for {} and {:?}", poly.index, ray);
             }
         }
 
