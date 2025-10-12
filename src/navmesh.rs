@@ -307,8 +307,7 @@ impl NavMesh {
 
     pub fn get_polygon_height(
         &self, 
-        loc:          Vec2,
-        water_height: f32
+        loc:          Vec2
     ) -> Option<(&Polygon, f32)> {
 
         if let Some(poly) = self.has_point(loc){
@@ -320,7 +319,7 @@ impl NavMesh {
                 let height: i32 = ORIGIN_HEIGHT as i32 - dist;
 
                 if poly.typ == NavType::Water {
-                    return Some((poly, water_height))
+                    return Some((poly, self.water_height))
                 } else {
                     return Some((poly, height as f32));
                 }
