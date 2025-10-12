@@ -18,13 +18,15 @@ const VERTEX_SIMILARITY_THRESHOLD: f32 = 1.0;
 pub struct NavMesh {
     pub polygons: HashMap<usize, Polygon>,
     pub vertices: HashMap<usize, Vertex>,
+    pub water_height: f32
 }
 
 impl Default for NavMesh {
     fn default() -> Self {
         NavMesh{
             polygons: HashMap::default(),
-            vertices: HashMap::default()
+            vertices: HashMap::default(),
+            water_height: 0.0
         }
     }
 }

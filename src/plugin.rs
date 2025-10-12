@@ -137,7 +137,8 @@ fn generate_navmesh(
             info!("[NAVMESH][GENERATE] after find_neighbours");
 
             navmesh_done = true;
-            let navmesh = NavMesh::from_hash_navquads(&mut nav_quads);
+            let mut navmesh = NavMesh::from_hash_navquads(&mut nav_quads);
+            navmesh.water_height = navconfig.water_height;
             info!("[NAVMESH][GENERATE] NavMesh Polygon count: {} ", navmesh.polygons.len());
             info!("[NAVMESH][GENERATE] NavMesh Vertex count: {} ", navmesh.vertices.len());
 
