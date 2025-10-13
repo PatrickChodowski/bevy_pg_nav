@@ -19,7 +19,7 @@ const EPSILON: f32 = 1e-4;
 #[derive(Debug, PartialEq, Clone, Reflect, Serialize, Deserialize)]
 pub struct Path {
     pub length: f32,
-    pub path: Vec<Vec2>,
+    pub path: SmallVec<[Vec2;10]>,
 }
 impl Path {
     pub fn len(&self) -> usize {
@@ -226,9 +226,9 @@ impl<'m> PathFinder<'m> {
         let mut visited = HashSet::new();
         loop {
             for successor in self.edges_between(&node).iter() {
-
-                let start: &Vertex = self.navmesh.vertex(&successor.edge.0).unwrap();
-                let end: &Vertex = self.navmesh.vertex(&successor.edge.1).unwrap();
+                let [successor_edge_0, successor_edge_1] = successor.edge;
+                let start: &Vertex = self.navmesh.vertex(&successor_edge_0).unwrap();
+                let end: &Vertex = self.navmesh.vertex(&successor_edge_1).unwrap();
                 let start_loc: Vec2 = start.xz();
                 let end_loc: Vec2 = end.xz();
                 let other_sides = start.common(&end, &node.polygon_to, &self.blockers);
@@ -305,8 +305,8 @@ impl<'m> PathFinder<'m> {
                     self.try_add_node(
                         root,
                         **other_side,
-                        (successor.interval.0, successor.edge.0), //start
-                        (successor.interval.1, successor.edge.1), // end
+                        (successor.interval.0, successor_edge_0), //start
+                        (successor.interval.1, successor_edge_1), // end
                         &node,
                     );
                 }
@@ -361,15 +361,15 @@ impl<'m> PathFinder<'m> {
                         .map(|v| {(self.navmesh.vertices[&v.index].loc.xz()).distance_squared(edge)})
                         .enumerate()
                         .collect::<Vec<_>>();
-                    distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                    distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                     distances.first().unwrap().0
                 })+ 1;
             let left_index = polygon.vertices.len() + right_index - 2;
             let mut typ = SuccessorType::RightNonObservable;
-            for edge in polygon.circular_edges_index(right_index..=left_index) {
+            for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
 
-                let Some(start) = self.navmesh.vertex(&edge[0]) else {panic!("Lack of vertex for {}", &edge[0])};
-                let Some(end)  = self.navmesh.vertex(&edge[1]) else {panic!("Lack of vertex for {}", &edge[1])};
+                let Some(start) = self.navmesh.vertex(&edge0) else {panic!("Lack of vertex for {}", &edge[0])};
+                let Some(end)  = self.navmesh.vertex(&edge1) else {panic!("Lack of vertex for {}", &edge[1])};
 
                 let mut start_point = Vec2::new(start.loc.x, start.loc.z);
                 let end_point = Vec2::new(end.loc.x, end.loc.z);
@@ -387,7 +387,7 @@ impl<'m> PathFinder<'m> {
                             {
                                 successors.push(Successor {
                                     interval: (start_point, intersect),
-                                    edge: edge.into(),
+                                    edge: [edge0, edge1],
                                     typ,
                                 });
                                 start_point = intersect;
@@ -432,7 +432,7 @@ impl<'m> PathFinder<'m> {
                 }
                 successors.push(Successor {
                     interval: (start_point, end_intersection_p.unwrap_or(end_point)),
-                    edge: edge.into(),
+                    edge: [edge0, edge1],
                     typ,
                 });
                 match end_root_int1 {
@@ -443,7 +443,7 @@ impl<'m> PathFinder<'m> {
                         if let Some(intersect) = end_intersection_p {
                             successors.push(Successor {
                                 interval: (intersect, end_point),
-                                edge: edge.into(),
+                                edge: [edge0, edge1],
                                 typ,
                             });
                         }
@@ -469,7 +469,7 @@ impl<'m> PathFinder<'m> {
 
 #[derive(PartialEq)]
 pub struct Node {
-    path:                   Vec<Vec2>,
+    path:                   SmallVec<[Vec2;10]>,
     root:                   Vec2,
     interval:               (Vec2, Vec2),
     edge:                   (usize, usize),
@@ -484,7 +484,8 @@ impl Node {
         from: (Vec2, usize)
     ) -> Self {
         let empty_node = Node {
-            path: vec![],
+            // path: vec![],
+            path: SmallVec::new(),
             root: from.0,
             interval: (Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)),
             edge: (0, 0),
@@ -677,7 +678,7 @@ enum SuccessorType {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Successor {
     interval: (Vec2, Vec2),
-    edge: (usize, usize),
+    edge: [usize;2],
     typ: SuccessorType,
 }
 

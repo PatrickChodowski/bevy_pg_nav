@@ -62,7 +62,7 @@ impl NavMesh {
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
                 length: from.distance(to),
-                path: vec![to],
+                path: vec![to].into(),
             };
             return Some((path, starting_polygon.index, ending_polygon.index));
         }
