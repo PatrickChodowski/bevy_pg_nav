@@ -15,6 +15,4 @@ pub mod prelude {
     pub use crate::pathfinding::Path;
     pub use crate::navmesh::{NavMesh, Polygon};
 
-    pub use crate::tools::NavRay;
-
 }

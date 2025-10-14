@@ -295,6 +295,38 @@ impl NavMesh {
         return None;
     }
 
+    
+    // Iterate through polygon neighbours till we find end of raycast
+    pub fn ray_intersection_blocker(
+        &self, 
+        origin: Vec3, 
+        direction: Vec3, 
+        len: f32,
+        origin_polygon: usize,
+        blockers: Vec<NavType>
+    
+    ) -> Option<(Vec3, f32, usize, NavType)>  {
+
+        if let Some(poly) = self.polygons.get(&origin_polygon){
+
+            for (typ, n_poly_id) in poly.neighbours.iter() {
+                
+            }
+
+
+        }
+
+
+
+
+        // for (_polygon, polygon) in self.polygons.iter(){
+        //     if let Some((world_pos, _dist, index)) = polygon.ray_intersection(origin, direction){
+        //         return Some((world_pos, _dist, index, polygon.typ));
+        //     }
+        // }
+        return None;
+    }
+
     // pub(crate) fn clear(&mut self) {
     //     self.polygons.clear();
     //     self.vertices.clear();
