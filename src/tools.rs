@@ -26,9 +26,6 @@ impl NavRay {
         self.direction.into()
     }
 
-    pub(crate) fn position(&self, distance: f32) -> Vec3 {
-        (self.origin + self.direction * distance).into()
-    }
     pub(crate) fn down(x: f32, z: f32) -> Self {
         let origin = Vec3::new(x, 1000.0, z);
         let dir = Vec3::NEG_Y;

@@ -7,7 +7,6 @@ use std::ops::RangeInclusive;
 use ordered_float::*;
 use serde::{Serialize,Deserialize};
 
-use crate::tools::NavRay;
 use crate::pathfinding::{PathFinder, Path, SearchStep};
 use crate::types::{NavQuad, Neighbours, QuadAABB, NavType};
 
@@ -287,9 +286,9 @@ impl NavMesh {
         return mapping_by_index;
     }
 
-    pub fn ray_intersection(&self, ray: &NavRay) -> Option<(Vec3, f32, usize, NavType)>  {
+    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<(Vec3, f32, usize, NavType)>  {
         for (_polygon, polygon) in self.polygons.iter(){
-            if let Some((world_pos, _dist, index)) = polygon.ray_intersection(&ray){
+            if let Some((world_pos, _dist, index)) = polygon.ray_intersection(origin, direction){
                 return Some((world_pos, _dist, index, polygon.typ));
             }
         }
@@ -308,10 +307,10 @@ impl NavMesh {
     ) -> Option<(&Polygon, f32)> {
 
         if let Some(poly) = self.has_point(loc){
-            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
-            let ray = NavRay::new(origin, Vec3::NEG_Y);
+            let origin = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
+            let direction = Vec3A::NEG_Y;
 
-            if let Some((_pos, dist, _index)) = poly.ray_intersection(&ray){
+            if let Some((_pos, dist, _index)) = poly.ray_intersection(origin, direction){
                 let dist = dist.round() as i32;
                 let height: i32 = ORIGIN_HEIGHT as i32 - dist;
 
@@ -322,7 +321,7 @@ impl NavMesh {
                 }
             } else {
                 // TODO solve this
-                warn!("Navmesh ray calculation went wrong for {} and {:?}", poly.index, ray);
+                warn!("Navmesh ray calculation went wrong for {} and {:?}", poly.index, origin);
             }
         }
 
@@ -402,10 +401,10 @@ impl Polygon {
         });
     }
     
-    pub fn ray_intersection(&self, ray: &NavRay) -> Option<(Vec3, f32, usize)>  {
-        if let Some(distance) = self.aabb.ray_intersection(ray) {
+    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<(Vec3, f32, usize)>  {
+        if let Some(distance) = self.aabb.ray_intersection(origin, direction) {
             if distance > 0.0 {
-                let position = ray.position(distance);
+                let position: Vec3 = (origin + direction * distance).into();
                 return Some((position, distance, self.index));
             }
         }

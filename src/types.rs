@@ -452,15 +452,15 @@ impl QuadAABB {
     // }
 
 
-    pub fn ray_intersection(&self, ray: &NavRay) -> Option<f32> {
+    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<f32> {
 
         let min_corner = self.min_x_min_z;
         let max_corner = self.max_x_max_z;
     
-        let inv_dir = ray.direction.recip();
+        let inv_dir = direction.recip();
         
-        let t1 = (min_corner - ray.origin) * inv_dir;
-        let t2 = (max_corner - ray.origin) * inv_dir;
+        let t1 = (min_corner - origin) * inv_dir;
+        let t2 = (max_corner - origin) * inv_dir;
         
         let t_min = Vec3A::min(t1, t2);
         let t_max = Vec3A::max(t1, t2);
