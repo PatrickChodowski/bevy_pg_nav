@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_pg_nav"
-version = "1.16.5"
+version = "1.16.7"
 dependencies = [
  "bevy",
  "bevy_common_assets",

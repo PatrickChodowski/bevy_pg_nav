@@ -12,6 +12,7 @@ use std::fmt;
 use std::collections::BinaryHeap;
 use crate::navmesh::{NavMesh, Polygon, Vertex};
 use crate::types::NavType;
+use std::f32::consts::PI;
 
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
@@ -24,6 +25,63 @@ pub struct Path {
 impl Path {
     pub fn len(&self) -> usize {
         return self.path.len();
+    }
+
+    pub fn offset_inward(
+        &self, 
+        start_point: Vec2, 
+        agent_radius: f32
+    ) -> Path {
+        let pts = &self.path;
+        let n = pts.len();
+        if n < 1 {
+            return self.clone();
+        }
+
+        let mut new_pts: SmallVec<[Vec2; 10]> = SmallVec::with_capacity(n);
+
+        for i in 0..n {
+            let curr = pts[i];
+
+            // Determine incoming and outgoing directions
+            let prev = if i == 0 { start_point } else { pts[i - 1] };
+            let next = if i < n - 1 { pts[i + 1] } else { curr };
+
+            let dir_in = (curr - prev).normalize_or_zero();
+            let dir_out = (next - curr).normalize_or_zero();
+
+            // Normals for each direction (pointing left)
+            let n1 = Vec2::new(-dir_in.y, dir_in.x);
+            let n2 = Vec2::new(-dir_out.y, dir_out.x);
+
+            // Smooth average normal
+            let mut normal = (n1 + n2).normalize_or_zero();
+
+            if i == 0 {
+                normal = n2.normalize_or_zero(); // use forward normal
+            } else if i == n - 1 {
+                normal = n1.normalize_or_zero(); // use backward normal
+            }
+            
+            let cross = dir_in.perp_dot(dir_out);
+            if cross > 0.0 {
+                normal = -normal;
+            }
+
+            let offset_point = curr + normal * agent_radius;
+            new_pts.push(offset_point);
+        }
+
+        // Recompute path length
+        let mut total_len = 0.0;
+        for w in new_pts.windows(2) {
+            total_len += (w[1] - w[0]).length();
+        }
+
+        Path {
+            length: total_len,
+            path: new_pts,
+        }
     }
 }
 
@@ -57,7 +115,7 @@ impl<'m> PathFinder<'m> {
 
     pub fn setup(
         navmesh: &'m NavMesh,
-        from: (Vec2, usize),
+        from: (Vec2, usize),    
         to:   (Vec2, usize),
         blockers: Option<Vec<NavType>>
     ) -> Self {
@@ -194,6 +252,7 @@ impl<'m> PathFinder<'m> {
                 let mut path = next_node.path;
                 if let Some(turn) = turning_point(next_node.root, self.to, next_node.interval) {
                     // println!("New turn: {}", turn);
+
                     path.push(turn);
                 }
                 let complete = next_node.polygon_to == self.polygon_to;
@@ -238,6 +297,11 @@ impl<'m> PathFinder<'m> {
                     continue;
                 }
 
+                if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
+                    // println!("Successor distance interval too short");
+                    continue;
+                }
+
                 for other_side in other_sides.iter(){
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
@@ -262,12 +326,10 @@ impl<'m> PathFinder<'m> {
                             let is_corner = vertex.is_corner(&self.blockers);
                             let dist = vertex.xz().distance_squared(node.interval.0);
 
-                            if is_corner {
-                                // println!("      Vertex: {:?} IS RIGHT A CORNER distance: {}", vertex, dist);
-                            }
+                            // let interval_dist = node.interval.0.distance_squared(node.interval.1);
+
                             if is_corner && dist< EPSILON{
-                            // if is_corner {
-                                node.interval.0 
+                                node.interval.0
                             } else {
                                 continue;
                             }
@@ -281,10 +343,6 @@ impl<'m> PathFinder<'m> {
                             let dist = vertex.xz().distance_squared(node.interval.1);
                             let is_corner = vertex.is_corner(&self.blockers);
 
-                            if is_corner {
-                                // println!("      Vertex: {:?} IS LEFT A CORNER", vertex);
-                            }
-
                             if is_corner && dist < EPSILON{
                                 node.interval.1
                             } else {
@@ -295,11 +353,6 @@ impl<'m> PathFinder<'m> {
 
                     if root != node.root {
                         // println!("  New root: {:?}", root);
-                    }
-
-                    if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
-                        // println!("Successor distance interval too short");
-                        continue;
                     }
 
                     self.try_add_node(

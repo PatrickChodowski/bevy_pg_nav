@@ -47,6 +47,7 @@ impl NavMesh {
         from: Vec2, 
         to: Vec2, 
         blockers: Option<Vec<NavType>>,
+        agent_radius: f32,
         search_limit: usize
     ) -> Option<(Path, usize, usize)> {
         let Some(starting_polygon) = self.has_point(from) else {
@@ -77,14 +78,10 @@ impl NavMesh {
 
         for _s in 0..search_limit {
 
-            // if let Some(best) = path_finder.best(){
-            //     println!("   Step: {} Best: {:?}", _s, best)
-            // }
-
              match path_finder.search() {
                 SearchStep::Found(path) => {
-                    // info!("Found path between {} and {}: {:?}", from, to, path);
-                    return Some((path, starting_polygon.index, ending_polygon.index));
+                    let offset_path = path.offset_inward(from, agent_radius);
+                    return Some((offset_path, starting_polygon.index, ending_polygon.index));
                 }
                 SearchStep::NotFound => {
                     return None;
