@@ -12,7 +12,6 @@ use std::fmt;
 use std::collections::BinaryHeap;
 use crate::navmesh::{NavMesh, Polygon, Vertex};
 use crate::types::NavType;
-use std::f32::consts::PI;
 
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
