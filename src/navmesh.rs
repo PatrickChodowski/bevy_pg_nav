@@ -2,7 +2,7 @@
 use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
-use bevy::math::{Vec3A};
+use bevy::math::{Vec3A, Vec3};
 use std::ops::RangeInclusive;
 use ordered_float::*;
 use serde::{Serialize,Deserialize};
@@ -286,7 +286,8 @@ impl NavMesh {
         return mapping_by_index;
     }
 
-    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<(Vec3, f32, usize, NavType)>  {
+    pub fn ray_intersection(&self, origin: Vec3, direction: Vec3) -> Option<(Vec3, f32, usize, NavType)>  {
+        let direction = direction.normalize();
         for (_polygon, polygon) in self.polygons.iter(){
             if let Some((world_pos, _dist, index)) = polygon.ray_intersection(origin, direction){
                 return Some((world_pos, _dist, index, polygon.typ));
@@ -309,7 +310,15 @@ impl NavMesh {
 
         if let Some(poly) = self.polygons.get(&origin_polygon){
 
+            if let Some(a) = poly.ray_intersection(origin, direction*len) {
+                return Some((origin, 0.0, origin_polygon, NavType::Water));
+            }
+
+
             for (typ, n_poly_id) in poly.neighbours.iter() {
+
+
+
                 
             }
 
@@ -339,8 +348,8 @@ impl NavMesh {
     ) -> Option<(&Polygon, f32)> {
 
         if let Some(poly) = self.has_point(loc){
-            let origin = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
-            let direction = Vec3A::NEG_Y;
+            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
+            let direction = Vec3::NEG_Y;
 
             if let Some((_pos, dist, _index)) = poly.ray_intersection(origin, direction){
                 let dist = dist.round() as i32;
@@ -433,8 +442,8 @@ impl Polygon {
         });
     }
     
-    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<(Vec3, f32, usize)>  {
-        if let Some(distance) = self.aabb.ray_intersection(origin, direction) {
+    pub fn ray_intersection(&self, origin: Vec3, direction: Vec3) -> Option<(Vec3, f32, usize)>  {
+        if let Some(distance) = self.aabb.ray_intersection(origin.into(), direction.into()) {
             if distance > 0.0 {
                 let position: Vec3 = (origin + direction * distance).into();
                 return Some((position, distance, self.index));
