@@ -8,7 +8,7 @@ use ordered_float::*;
 use serde::{Serialize,Deserialize};
 
 use crate::pathfinding::{PathFinder, Path, SearchStep};
-use crate::types::{NavQuad, Neighbours, QuadAABB, NavType};
+use crate::types::{NavQuad, NavType, Neighbours, QuadAABB};
 
 const ORIGIN_HEIGHT: f32 = 1000.0;
 const VERTEX_SIMILARITY_THRESHOLD: f32 = 1.0;
@@ -306,41 +306,50 @@ impl NavMesh {
         origin_polygon: usize,
         blockers: Vec<NavType>
     
-    ) -> Option<(Vec3, f32, usize, NavType)>  {
+    ) -> (bool, f32) {
 
-        if let Some(poly) = self.polygons.get(&origin_polygon){
+        // Need to run till we find the polygon with the end of ray or the first blocker
+        let mut polys_to_check: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
+        let mut polys_buffer: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
+        // Max 3 iterations
+        let safety: usize = 4;
+        let mut i: usize = 0;
+        // let end: Vec2 = Vec2::new(origin.x + direction.x, origin.z + direction.z);
 
-            if let Some(a) = poly.ray_intersection(origin, direction*len) {
-                return Some((origin, 0.0, origin_polygon, NavType::Water));
+        let Some(origin_poly) = self.polygons.get(&origin_polygon) else {return (false, 0.0);};
+        polys_to_check.extend(origin_poly.neighbours.iter());
+
+        while i < safety {
+            polys_to_check.clear();
+            polys_to_check.extend(polys_buffer.iter());
+            polys_buffer.clear();
+
+            for (typ, poly_id) in polys_to_check.iter(){
+                let Some(poly) = self.polygons.get(*poly_id) else {continue;};
+                let (intersections, min_dist) = poly.ray_side_intersection(origin, direction, len);
+                match (intersections, blockers.contains(typ)) {
+                    (0, _) => {continue; /* Wrong side */}
+                    (1, false) => {return (false, len); /* Reached end of the ray, no blockers*/}
+                    (_, true) => {return (true, min_dist); /* Reached end of the ray, its a blocker*/}
+                    (2, false) => {
+                        // Clear polys to check
+                        // Break loop, clear polys_to_check, add current neighbours of current poly to check
+                        polys_buffer.extend(poly.neighbours.iter());
+                        break;
+                    }
+                    (_,_) => {}
+                }
             }
-
-
-            for (typ, n_poly_id) in poly.neighbours.iter() {
-
-
-
-                
-            }
-
-
+            i += 1;
         }
 
-
-
-
-        // for (_polygon, polygon) in self.polygons.iter(){
-        //     if let Some((world_pos, _dist, index)) = polygon.ray_intersection(origin, direction){
-        //         return Some((world_pos, _dist, index, polygon.typ));
-        //     }
-        // }
-        return None;
+        return (false, 0.0);
     }
 
-    // pub(crate) fn clear(&mut self) {
-    //     self.polygons.clear();
-    //     self.vertices.clear();
-    // }
-
+    pub fn clear(&mut self) {
+        self.polygons.clear();
+        self.vertices.clear();
+    }
 
     pub fn get_polygon_height(
         &self, 
@@ -450,6 +459,10 @@ impl Polygon {
             }
         }
         return None;
+    }
+
+    pub fn ray_side_intersection(&self, origin: Vec3, direction: Vec3, len: f32) -> (usize, f32) {
+        return self.aabb.ray_side_intersection(origin.into(), direction.into(), len);
     }
 
     pub fn display(&self, gizmos: &mut Gizmos, white: bool, offset_y: f32){

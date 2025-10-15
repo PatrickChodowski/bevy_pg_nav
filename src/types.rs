@@ -389,7 +389,6 @@ pub(crate) enum Edge {
     Right
 }
 
-
 impl QuadAABB {
     pub fn from_loc(
         loc: Vec3A, 
@@ -477,6 +476,29 @@ impl QuadAABB {
         }
     }
 
+    pub fn ray_side_intersection(&self, origin: Vec3A, direction: Vec3A, len: f32) -> (usize, f32) {
+        let end = Vec2::new(origin.x + direction.x, origin.z + direction.z);
+        let (r_x1, r_z1) = (origin.x, origin.z);
+        let (r_x2, r_z2) = (end.x, end.y);
+        let edges: [[(f32, f32); 2]; 4] = self.edges_f32();
+        let mut distances = Vec::with_capacity(2);
+        for &[(x1, z1), (x2, z2)] in edges.iter() {
+            if let Some(t) = line_segments_intersect((r_x1, r_z1), (r_x2, r_z2), (x1, z1), (x2, z2)) {
+                let dist = t * len;
+                distances.push(dist);
+            }
+        }
+        match distances.len(){
+            0 => {return(0, len);}
+            _ => {
+                distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let min_dist = *distances.iter().next().unwrap();
+                return (distances.len(), min_dist);
+            }
+        }
+    }
+
+
     pub(crate) fn edges_corners_2d(&self) -> (Vec<[Vec2; 2]>, Vec<Vec2>) {
         let corners = self.corners_2d();
     
@@ -495,25 +517,25 @@ impl QuadAABB {
         return (edges, corners);
     }
 
-    // #[inline(always)]
-    // fn top(&self) -> [(f32, f32); 2]{
-    //     return [(self.min_x, self.min_z), (self.max_x, self.min_z)];
-    // }
+    #[inline(always)]
+    fn top_f32(&self) -> [(f32, f32); 2]{
+        return [(self.min_x, self.min_z), (self.max_x, self.min_z)];
+    }
 
-    // #[inline(always)]
-    // fn bottom(&self) -> [(f32, f32); 2]{
-    //     return [(self.min_x, self.max_z), (self.max_x, self.max_z)];
-    // }
+    #[inline(always)]
+    fn bottom_f32(&self) -> [(f32, f32); 2]{
+        return [(self.min_x, self.max_z), (self.max_x, self.max_z)];
+    }
 
-    // #[inline(always)]
-    // fn left(&self) -> [(f32, f32); 2]{
-    //     return [(self.min_x, self.min_z), (self.min_x, self.max_z)];
-    // }
+    #[inline(always)]
+    fn left_f32(&self) -> [(f32, f32); 2]{
+        return [(self.min_x, self.min_z), (self.min_x, self.max_z)];
+    }
 
-    // #[inline(always)]
-    // fn right(&self) -> [(f32, f32); 2]{
-    //     return [(self.max_x, self.min_z), (self.max_x, self.max_z)];
-    // }
+    #[inline(always)]
+    fn right_f32(&self) -> [(f32, f32); 2]{
+        return [(self.max_x, self.min_z), (self.max_x, self.max_z)];
+    }
 
     #[inline(always)]
     fn top_u32(&self) -> [(u32, u32); 2]{
@@ -535,13 +557,21 @@ impl QuadAABB {
         return [(self.max_x as u32, self.min_z as u32), (self.max_x as u32, self.max_z as u32)];
     }
 
-    #[allow(dead_code)]
     fn edges_u32(&self) -> [[(u32, u32); 2]; 4] {
         [
             self.top_u32(),
             self.right_u32(),
             self.left_u32(),
             self.bottom_u32()
+        ]
+    }
+
+    fn edges_f32(&self) -> [[(f32, f32); 2]; 4] {
+        [
+            self.top_f32(),
+            self.right_f32(),
+            self.left_f32(),
+            self.bottom_f32()
         ]
     }
 
@@ -708,4 +738,39 @@ impl QuadAABB {
         return Vec3A::new(center_x, center_y, center_z);
     }
 
+}
+
+
+/// Check if two 2D line segments intersect
+fn line_segments_intersect(
+    (x1, z1): (f32, f32),
+    (x2, z2): (f32, f32),
+    (x3, z3): (f32, f32),
+    (x4, z4): (f32, f32),
+) -> Option<f32> {
+    fn cross(ax: f32, az: f32, bx: f32, bz: f32) -> f32 {
+        ax * bz - az * bx
+    }
+
+    let d1x = x2 - x1;
+    let d1z = z2 - z1;
+    let d2x = x4 - x3;
+    let d2z = z4 - z3;
+
+    let denom = cross(d1x, d1z, d2x, d2z);
+    if denom.abs() < f32::EPSILON {
+        return None; // parallel
+    }
+
+    let dx = x3 - x1;
+    let dz = z3 - z1;
+
+    let t = cross(dx, dz, d2x, d2z) / denom;
+    let u = cross(dx, dz, d1x, d1z) / denom;
+
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some(t)
+    } else {
+        None
+    }
 }
