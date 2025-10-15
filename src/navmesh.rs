@@ -308,22 +308,19 @@ impl NavMesh {
     
     ) -> (bool, f32) {
 
+        // info!("Inside ray intersection blocker");
         // Need to run till we find the polygon with the end of ray or the first blocker
         let mut polys_to_check: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
         let mut polys_buffer: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
-        // Max 3 iterations
-        let safety: usize = 4;
+
+        let safety: usize = 5;
         let mut i: usize = 0;
-        // let end: Vec2 = Vec2::new(origin.x + direction.x, origin.z + direction.z);
 
         let Some(origin_poly) = self.polygons.get(&origin_polygon) else {return (false, 0.0);};
         polys_to_check.extend(origin_poly.neighbours.iter());
 
         while i < safety {
-            polys_to_check.clear();
-            polys_to_check.extend(polys_buffer.iter());
-            polys_buffer.clear();
-
+            // info!("Polys to check len: {}", polys_to_check.len());
             for (typ, poly_id) in polys_to_check.iter(){
                 let Some(poly) = self.polygons.get(*poly_id) else {continue;};
                 let (intersections, min_dist) = poly.ray_side_intersection(origin, direction, len);
@@ -337,10 +334,15 @@ impl NavMesh {
                         polys_buffer.extend(poly.neighbours.iter());
                         break;
                     }
-                    (_,_) => {}
+                    (_,_) => {panic!("Should not happen never");}
                 }
             }
+            polys_to_check.clear();
+            polys_to_check.extend(polys_buffer.iter());
+            polys_buffer.clear();
             i += 1;
+
+            // if i == safety {warn!("reached safety");}
         }
 
         return (false, 0.0);
