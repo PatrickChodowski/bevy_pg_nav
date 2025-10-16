@@ -1,7 +1,7 @@
 
 use bevy::prelude::*;
 use serde::{Serialize, Deserialize};
-use bevy::render::primitives::Aabb;
+use bevy::camera::primitives::Aabb;
 use bevy::platform::collections::HashMap;
 use dashmap::DashMap;
 use bevy::tasks::IoTaskPool;
@@ -26,18 +26,18 @@ pub struct PGNavPlugin;
 impl Plugin for PGNavPlugin {
     fn build(&self, app: &mut App) {
         app
-        .add_event::<GenerateNavMesh>()
+        .add_message::<GenerateNavMesh>()
         .add_plugins(JsonAssetPlugin::<NavMesh>::new(&["navmesh.json"]))
         .insert_resource(NavConfig::default())
         .insert_resource(NavMesh::default())
         .insert_resource(NavDebug::default())
-        .add_systems(PreUpdate, generate_navmesh.run_if(on_event::<GenerateNavMesh>))
+        .add_systems(PreUpdate, generate_navmesh.run_if(on_message::<GenerateNavMesh>))
         .add_systems(Update, debug)
         ;
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 pub struct GenerateNavMesh {
     pub name: String,
     pub map_name: String,
@@ -62,7 +62,7 @@ impl GenerateNavMesh {
 }
 
 fn generate_navmesh(
-    mut events:     EventReader<GenerateNavMesh>,
+    mut events:     MessageReader<GenerateNavMesh>,
     mut commands:   Commands,
     meshes:         Res<Assets<Mesh>>,
     mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
@@ -90,7 +90,7 @@ fn generate_navmesh(
             info!("[NAVMESH] Extent: {}", extent);
 
             let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
-            let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.compute_matrix());
+            let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
             let loc = terrain_transform.translation;
             let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
             let max_x = (loc.x + half_chunk_size + safety_offset) as u32;
@@ -161,7 +161,7 @@ fn generate_navmesh(
 
         if !navmesh_done {
             // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
-            commands.send_event(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
+            commands.write_message(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
         }
     }
 }

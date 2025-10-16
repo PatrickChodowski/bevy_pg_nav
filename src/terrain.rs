@@ -1,10 +1,8 @@
 use std::f32::EPSILON;
 
 use bevy::prelude::*;
-use bevy::render::{
-    mesh::{Indices, Mesh, VertexAttributeValues},
-    render_resource::PrimitiveTopology,
-};
+use bevy::mesh::{Indices, Mesh, VertexAttributeValues};
+use bevy::render::render_resource::PrimitiveTopology;
 use bevy::platform::collections::HashMap;
 
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};

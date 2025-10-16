@@ -1,5 +1,5 @@
 
-use bevy::{prelude::*, render::primitives::Aabb};
+use bevy::{prelude::*, camera::primitives::Aabb};
 use bevy::platform::collections::{HashSet, HashMap};
 use core::f32;
 use std::usize;
