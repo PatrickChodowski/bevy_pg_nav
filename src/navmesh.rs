@@ -17,7 +17,8 @@ const VERTEX_SIMILARITY_THRESHOLD: f32 = 1.0;
 pub struct NavMesh {
     pub polygons: HashMap<usize, Polygon>,
     pub vertices: HashMap<usize, Vertex>,
-    pub water_height: f32
+    pub water_height: f32,
+    pub search_limit: usize
 }
 
 impl Default for NavMesh {
@@ -25,7 +26,8 @@ impl Default for NavMesh {
         NavMesh{
             polygons: HashMap::default(),
             vertices: HashMap::default(),
-            water_height: 0.0
+            water_height: 0.0,
+            search_limit: 1000
         }
     }
 }
@@ -46,8 +48,7 @@ impl NavMesh {
         from: Vec2, 
         to: Vec2, 
         blockers: Option<Vec<NavType>>,
-        agent_radius: f32,
-        search_limit: usize
+        agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
         let Some(starting_polygon) = self.has_point(from) else {
             println!("no starting polygon index");
@@ -75,7 +76,7 @@ impl NavMesh {
             blockers
         );
 
-        for _s in 0..search_limit {
+        for _s in 0..self.search_limit {
 
              match path_finder.search() {
                 SearchStep::Found(path) => {
