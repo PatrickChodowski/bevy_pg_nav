@@ -1,3 +1,4 @@
+use bevy::log::error_once;
 use bevy::prelude::{Vec2, Vec3Swizzles, error, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
@@ -419,8 +420,8 @@ impl<'m> PathFinder<'m> {
             let mut typ = SuccessorType::RightNonObservable;
             for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
 
-                let Some(start) = self.navmesh.vertex(&edge0) else {error!("Lack of vertex for {}", &edge[0]); continue; };
-                let Some(end)  = self.navmesh.vertex(&edge1) else {error!("Lack of vertex for {}", &edge[1]); continue; };
+                let Some(start) = self.navmesh.vertex(&edge0) else {error_once!("Lack of vertex for {}", &edge[0]); continue; }; // TODO: changed to error_once but there will be more
+                let Some(end)  = self.navmesh.vertex(&edge1) else {error_once!("Lack of vertex for {}", &edge[1]); continue; };
 
                 let mut start_point = Vec2::new(start.loc.x, start.loc.z);
                 let end_point = Vec2::new(end.loc.x, end.loc.z);
