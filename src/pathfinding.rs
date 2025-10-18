@@ -403,13 +403,13 @@ impl<'m> PathFinder<'m> {
                 .vertices
                 .iter()
                 .enumerate()
-                .find(|(_, v)| {(self.navmesh.vertices[&v.index].loc.xz()).distance_squared(edge) < 0.001})
+                .find(|(_, v)| {v.loc.xz().distance_squared(edge) < 0.001})
                 .map(|(i, _)| i)
                 .unwrap_or_else(|| {
                     let mut distances = polygon
                         .vertices
                         .iter()
-                        .map(|v| {(self.navmesh.vertices[&v.index].loc.xz()).distance_squared(edge)})
+                        .map(|v| {(v.loc.xz()).distance_squared(edge)})
                         .enumerate()
                         .collect::<Vec<_>>();
                     distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
