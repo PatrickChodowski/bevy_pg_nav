@@ -12,13 +12,13 @@ use bevy_common_assets::json::JsonAssetPlugin;
 use crate::functions::{
     find_neighbours, 
     merge_by_groups,
-    get_ray_meshes, 
+    get_target_ray_meshes, 
     raycasts_rain,
     loop_merge_quads_directional
 };
 
 use crate::terrain::TerrainRayMeshData;
-use crate::types::{RayMesh, NavQuad, Navigable, NavDebug, NavStatic};
+use crate::types::{RayTargetMesh, NavQuad, Navigable, NavDebug, NavStatic};
 use crate::navmesh::NavMesh;
 
 pub struct PGNavPlugin;
@@ -103,7 +103,7 @@ fn generate_navmesh(
             info!("[NAVMESH][GENERATE] DimX: ({})", max_x-min_x);
             info!("[NAVMESH][GENERATE] DimZ: ({})", max_z-min_z);
 
-            let ray_meshes: Vec<RayMesh> = get_ray_meshes(&mesh_query, &navconfig);
+            let ray_meshes: Vec<RayTargetMesh> = get_target_ray_meshes(&mesh_query, &navconfig);
             info!("[NAVMESH][GENERATE] after generating ray meshes");
 
             let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();

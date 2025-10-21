@@ -40,40 +40,40 @@ impl Navigable {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
-pub(crate) enum RayMeshType {
+pub(crate) enum RayTargetMeshType {
     Navigable,
     #[default]
     Blocker
 }
 
 #[derive(Debug)]
-pub(crate) enum RayMeshShape {
+pub(crate) enum RayTargetMeshShape {
     Circle((Vec3, f32, f32)), // Loc, radius, Vertex Height
     Rect((Vec3, Vec3, Vec2, f32))  // Loc, normal, Dimensions, Vertex Height
 }
-impl RayMeshShape{
+impl RayTargetMeshShape{
     pub(crate) fn new(
-        typ: RayMeshType, 
+        typ: RayTargetMeshType, 
         tr:  Transform, 
         y: f32, 
         aabb: &AABB,
         navconfig: &Res<NavConfig>
     ) -> Self {
         match typ {
-            RayMeshType::Navigable => {
+            RayTargetMeshType::Navigable => {
                 let mut loc = tr.translation;
                 loc.y = y; // Actually 
                 let initial_normal = Vec3::Z;
                 let rotated_normal = (tr.rotation * initial_normal).normalize();
-                return RayMeshShape::Rect(
+                return RayTargetMeshShape::Rect(
                     (loc, rotated_normal, aabb.dims(), tr.translation.y)
                 );
             }
-            RayMeshType::Blocker => {
+            RayTargetMeshType::Blocker => {
                 let radius = aabb.max_edge()*navconfig.blocker_scale;
                 let mut loc = tr.translation;
                 loc.y = y;
-                return RayMeshShape::Circle((loc, radius*radius, tr.translation.y));
+                return RayTargetMeshShape::Circle((loc, radius*radius, tr.translation.y));
             }
         }
     }
@@ -82,28 +82,27 @@ impl RayMeshShape{
 
 
 #[derive(Debug)]
-pub(crate) struct RayMesh {
+pub(crate) struct RayTargetMesh {
     pub y:         f32,
-    pub name:      Name,
-    pub shape:     RayMeshShape,
-    pub typ:       RayMeshType
+    pub shape:     RayTargetMeshShape,
+    pub typ:       RayTargetMeshType
 }
-impl RayMesh {
+impl RayTargetMesh {
 
     pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, NavType)> {
         match &self.shape {    
 
-            RayMeshShape::Circle((loc, radius, height)) => {
+            RayTargetMeshShape::Circle((loc, radius, height)) => {
                 let distance: f32 = ray.origin.xz().distance_squared(loc.xz());
                 if &distance <= radius {
                     match self.typ {
-                        RayMeshType::Blocker => {return Some((*height, NavType::Blocker))}
-                        RayMeshType::Navigable => {return Some((loc.y, NavType::Navigable))}
+                        RayTargetMeshType::Blocker => {return Some((*height, NavType::Blocker))}
+                        RayTargetMeshType::Navigable => {return Some((loc.y, NavType::Navigable))}
                     };
                 }
             }
 
-            RayMeshShape::Rect((loc, norm, dims, height)) => {
+            RayTargetMeshShape::Rect((loc, norm, dims, height)) => {
                 let denom = norm.dot(Vec3::from(ray.direction));
                 // Check if the ray is parallel (denominator is too small)
                 if denom.abs() < 1e-6 {
@@ -129,8 +128,8 @@ impl RayMesh {
 
                 if local_x.abs() <= dims.x / 2.0 && local_z.abs() <= dims.y / 2.0 {
                     match self.typ {
-                        RayMeshType::Blocker => {return Some((*height, NavType::Blocker))}
-                        RayMeshType::Navigable => {return Some((hit_point.y, NavType::Navigable))}
+                        RayTargetMeshType::Blocker => {return Some((*height, NavType::Blocker))}
+                        RayTargetMeshType::Navigable => {return Some((hit_point.y, NavType::Navigable))}
                     };
                 } else {
                     return None;
@@ -142,21 +141,21 @@ impl RayMesh {
     }
 }
 
-impl PartialEq for RayMesh {
+impl PartialEq for RayTargetMesh {
     fn eq(&self, other: &Self) -> bool {
         self.y == other.y
     }
 }
 
-impl Eq for RayMesh {}
+impl Eq for RayTargetMesh {}
 
-impl PartialOrd for RayMesh {
+impl PartialOrd for RayTargetMesh {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for RayMesh {
+impl Ord for RayTargetMesh {
     fn cmp(&self, other: &Self) -> Ordering {
         other.y.partial_cmp(&self.y).unwrap_or(Ordering::Equal)
     }

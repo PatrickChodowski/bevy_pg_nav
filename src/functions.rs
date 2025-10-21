@@ -8,7 +8,7 @@ use dashmap::DashMap;
 
 use crate::tools::NavRay;
 use crate::tools::AABB;
-use crate::types::{NavType, RayMesh, Navigable, RayMeshType, RayMeshShape, QuadAABB, Neighbours, NavQuad, Edge, NavStatic};
+use crate::types::{NavType, RayTargetMesh, Navigable, RayTargetMeshType, RayTargetMeshShape, QuadAABB, Neighbours, NavQuad, Edge, NavStatic};
 use crate::terrain::TerrainRayMeshData;
 use crate::plugin::NavConfig;
 
@@ -153,7 +153,7 @@ pub(crate) fn find_neighbours(
 pub(crate) fn raycasts_rain(
     xs:             &Vec<f32>,
     zs:             &Vec<f32>,
-    ray_meshes:     &Vec<RayMesh>,
+    ray_meshes:     &Vec<RayTargetMesh>,
     trmd:           &TerrainRayMeshData,
     water_height:   f32,
     extent:         f32
@@ -232,14 +232,14 @@ pub(crate) fn raycasts_rain(
 }
 
 
-pub(crate) fn get_ray_meshes(
+pub(crate) fn get_target_ray_meshes(
     mesh_query:     &Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
     navconfig:      &Res<NavConfig>
-) -> Vec<RayMesh>{
+) -> Vec<RayTargetMesh>{
 
     let count = mesh_query.iter().len();
     let adjust_y: f32 = navconfig.adjust_y;
-    let mut ray_meshes: Vec<RayMesh> = Vec::with_capacity(count);
+    let mut ray_meshes: Vec<RayTargetMesh> = Vec::with_capacity(count);
 
     for (transform, name, aabb, navigable) in mesh_query.iter(){
 
@@ -256,20 +256,19 @@ pub(crate) fn get_ray_meshes(
         };
         let height = dims.z*2.0;
         let y: f32;
-        let rm_typ: RayMeshType;
+        let rm_typ: RayTargetMeshType;
 
         if let Some(navigable) = navigable {
             y = transform.translation.y + navigable.y;
-            rm_typ = RayMeshType::Navigable;
+            rm_typ = RayTargetMeshType::Navigable;
         } else {
             y = transform.translation.y + height - adjust_y;
-            rm_typ = RayMeshType::Blocker;
+            rm_typ = RayTargetMeshType::Blocker;
         }
 
-        let rm = RayMesh{
+        let rm = RayTargetMesh{
             y,
-            name: name.clone(),
-            shape: RayMeshShape::new(rm_typ, *transform, y, &aabb, navconfig),
+            shape: RayTargetMeshShape::new(rm_typ, *transform, y, &aabb, navconfig),
             typ: rm_typ
         };
 
@@ -282,13 +281,15 @@ pub(crate) fn get_ray_meshes(
     
     // move terrain to the last
     if ray_meshes.len() > 0 {
-        let first: RayMesh = ray_meshes.remove(0);
+        let first: RayTargetMesh = ray_meshes.remove(0);
         ray_meshes.push(first);
     }
 
-    for sm in ray_meshes.iter(){
-        info!("{}   {:?}", sm.name, sm.typ);
-    }
+    info!("[NAVMESH] RayMeshes count: {}", ray_meshes.len());
+
+    // for sm in ray_meshes.iter(){
+    //     info!("{}   {:?}", sm.name, sm.typ);
+    // }
 
     return ray_meshes;
 }
