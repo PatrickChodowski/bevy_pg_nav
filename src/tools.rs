@@ -147,10 +147,6 @@ impl IntersectionData {
 }
 
 
-
-
-
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct AABB {
     pub(crate) min_x: f32,
@@ -162,10 +158,6 @@ pub(crate) struct AABB {
 impl AABB {
     pub(crate) fn dims(&self) -> Vec2 {
         return Vec2::new(self.max_x - self.min_x, self.max_z-self.min_z)
-    }
-    pub (crate) fn max_edge(&self) -> f32 {
-        let dims = self.dims()*0.5;
-        return dims.x.max(dims.y);
     }
     pub(crate) fn from_loc_dims(loc: Vec3, dims: Vec2) -> Self {
         let aabb = AABB {

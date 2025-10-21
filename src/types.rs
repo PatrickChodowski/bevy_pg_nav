@@ -9,9 +9,9 @@ use crate::tools::NavRay;
 use crate::tools::AABB;
 
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum NavStaticType {
-    Navigable,
+    Navigable(f32), // Yoffset
     Blocker
 }
 
@@ -24,41 +24,39 @@ pub struct NavStatic {
 impl NavStatic {
     pub fn navigable_rect(
         dims: Vec2,
-        vertex_height: f32
+        y_offset: f32
     ) -> Self {
         NavStatic {
-            typ: NavStaticType::Navigable,
-            shape: NavStaticShape::rect(dims, vertex_height)
+            typ: NavStaticType::Navigable(y_offset),
+            shape: NavStaticShape::rect(dims)
         }
     }
 
     pub fn navigable_circle(
         radius : f32,
-        vertex_height: f32
+        y_offset: f32
     ) -> Self {
         NavStatic{
-            typ: NavStaticType::Navigable,
-            shape: NavStaticShape::circle(radius, vertex_height)
+            typ: NavStaticType::Navigable(y_offset),
+            shape: NavStaticShape::circle(radius)
         }
     }
 
     pub fn blocker_rect(
-        dims: Vec2,
-        vertex_height: f32
+        dims: Vec2
     ) -> Self {
         NavStatic{
             typ: NavStaticType::Blocker,
-            shape: NavStaticShape::rect(dims, vertex_height)
+            shape: NavStaticShape::rect(dims)
         }
     }
 
     pub fn blocker_circle(
-        radius : f32,
-        vertex_height: f32
+        radius : f32
     ) -> Self {
         NavStatic{
             typ: NavStaticType::Blocker,
-            shape: NavStaticShape::circle(radius, vertex_height)
+            shape: NavStaticShape::circle(radius)
         }
     }
 
@@ -66,22 +64,20 @@ impl NavStatic {
 
 #[derive(Debug, Clone, Copy)]
 pub enum NavStaticShape {
-    Circle((f32, f32)),      // radius, Vertex Height
-    Rect((Vec2, f32))  // normal, Dimensions, Vertex Height
+    Circle(f32), // radius
+    Rect(Vec2)  // Dimensions
 }
 
 impl NavStaticShape {
     pub fn circle( 
-        radius: f32, 
-        vertex_height: f32
+        radius: f32
     ) -> Self {
-        NavStaticShape::Circle((radius, vertex_height))
+        NavStaticShape::Circle(radius)
     }
     pub fn rect(
-        dims: Vec2,
-        vertex_height: f32
+        dims: Vec2
     ) -> Self {
-        NavStaticShape::Rect((dims, vertex_height))
+        NavStaticShape::Rect(dims)
     }
 }
 
@@ -103,31 +99,44 @@ impl Default for NavDebug {
 
 #[derive(Debug)]
 pub(crate) enum RayTargetMeshShape {
-    Circle((Vec3, f32, f32)), // Loc, radius, Vertex Height
-    Rect((Vec3, Vec3, Vec2, f32))  // Loc, normal, Dimensions, Vertex Height
+    Circle((Vec3, f32)), // Loc, radius, Vertex Height
+    Rect((Vec3, Vec3, Vec2))  // Loc, normal, Dimensions, Vertex Height
 }
 impl RayTargetMeshShape{
     pub(crate) fn from_navstatic(
         navstatic:   NavStatic,
         transform:   Transform, 
         aabb:        &Aabb,
-        // Return self and height of the plane
-    ) -> (Self, f32) {
-        let dims = Vec3::from(aabb.half_extents)*transform.scale;
-        let aabb = AABB::from_loc_dims(transform.translation, dims.xz());
-        let height = dims.z*2.0;
-        let y: f32 = transform.translation.y + height;
+        // Shape, ray_hit_height, vertex_height
+    ) -> (Self, f32, f32) {
+
+        // Extents are not scaled on its won
+        let aabb_dims: Vec3 = Vec3::from(aabb.half_extents)*transform.scale*2.0;
+
+        // This is simply top of the box
+        let ray_hit_height = transform.translation.y + aabb_dims.z;
+
+        // this is actual navmesh vertex visible/walkable
+        let vertex_height: f32 = match navstatic.typ {
+            NavStaticType::Navigable(y_offset) => {
+                transform.translation.y + y_offset*transform.scale.y
+            }
+            NavStaticType::Blocker => {
+                transform.translation.y - aabb_dims.z
+            }
+        };
+
         match navstatic.shape {
-            NavStaticShape::Rect(_) => {
+            NavStaticShape::Rect(dims) => {
                 let initial_normal = Vec3::Z;
                 let rotated_normal = (transform.rotation * initial_normal).normalize();
-                let shape = RayTargetMeshShape::Rect((transform.translation, rotated_normal, aabb.dims(), y));
-                return (shape, y);
+                let custom_aabb = AABB::from_loc_dims(transform.translation, dims*transform.scale.xy());
+                let shape = RayTargetMeshShape::Rect((transform.translation, rotated_normal, custom_aabb.dims()));
+                return (shape, ray_hit_height, vertex_height);
             }
-            NavStaticShape::Circle((radius, nav_y)) => {
-                let y = transform.translation.y + nav_y;
-                let shape = RayTargetMeshShape::Circle((transform.translation, radius, y));
-                return (shape, y);
+            NavStaticShape::Circle(radius) => {
+                let shape = RayTargetMeshShape::Circle((transform.translation, radius*transform.scale.x));
+                return (shape, ray_hit_height, vertex_height);
             }
         }
     }
@@ -137,26 +146,27 @@ impl RayTargetMeshShape{
 
 #[derive(Debug)]
 pub(crate) struct RayTargetMesh {
-    pub(crate) y:             f32, // Used for ordering
-    pub(crate) shape:     RayTargetMeshShape,
-    pub(crate) typ:       NavStaticType
+    pub(crate) ray_hit_height: f32, // Its top value, and its sorted by it, because to sort out multiple blockers stacked
+    pub(crate) vertex_height:  f32,
+    pub(crate) shape:          RayTargetMeshShape,
+    pub(crate) typ:            NavStaticType
 }
 impl RayTargetMesh {
 
-    pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, NavType)> {
+    pub(crate) fn test(&self, ray: &NavRay) -> Option<NavType> {
         match &self.shape {    
 
-            RayTargetMeshShape::Circle((loc, radius, height)) => {
+            RayTargetMeshShape::Circle((loc, radius)) => {
                 let distance: f32 = ray.origin.xz().distance_squared(loc.xz());
                 if &distance <= radius {
                     match self.typ {
-                        NavStaticType::Blocker => {return Some((*height, NavType::Blocker))}
-                        NavStaticType::Navigable => {return Some((loc.y, NavType::Navigable))}
+                        NavStaticType::Blocker => {return Some(NavType::Blocker)}
+                        NavStaticType::Navigable(_) => {return Some(NavType::Navigable)}
                     };
                 }
             }
 
-            RayTargetMeshShape::Rect((loc, norm, dims, height)) => {
+            RayTargetMeshShape::Rect((loc, norm, dims)) => {
                 let denom = norm.dot(Vec3::from(ray.direction));
                 // Check if the ray is parallel (denominator is too small)
                 if denom.abs() < 1e-6 {
@@ -182,8 +192,8 @@ impl RayTargetMesh {
 
                 if local_x.abs() <= dims.x / 2.0 && local_z.abs() <= dims.y / 2.0 {
                     match self.typ {
-                        NavStaticType::Blocker => {return Some((*height, NavType::Blocker))}
-                        NavStaticType::Navigable => {return Some((hit_point.y, NavType::Navigable))}
+                        NavStaticType::Blocker => {return Some(NavType::Blocker)}
+                        NavStaticType::Navigable(_) => {return Some(NavType::Navigable)}
                     };
                 } else {
                     return None;
@@ -197,7 +207,7 @@ impl RayTargetMesh {
 
 impl PartialEq for RayTargetMesh {
     fn eq(&self, other: &Self) -> bool {
-        self.y == other.y
+        self.ray_hit_height == other.ray_hit_height
     }
 }
 
@@ -211,7 +221,7 @@ impl PartialOrd for RayTargetMesh {
 
 impl Ord for RayTargetMesh {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.y.partial_cmp(&self.y).unwrap_or(Ordering::Equal)
+        other.ray_hit_height.partial_cmp(&self.ray_hit_height).unwrap_or(Ordering::Equal)
     }
 }
 

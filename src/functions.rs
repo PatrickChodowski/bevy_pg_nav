@@ -176,8 +176,10 @@ pub(crate) fn raycasts_rain(
 
             // Check against blockers and navigables
             for rm in ray_meshes.iter(){
-                if let Some((object_height, nvt)) = rm.test(&ray){
-                    height = object_height;
+                if let Some(nvt) = rm.test(&ray){
+                    if rm.vertex_height > height {
+                        height = rm.vertex_height; // Update, Only if its above the terrain height in that point
+                    }
                     vertex_type = nvt;
                     quad_normal = Vec3A::Y;
                     break;
@@ -236,8 +238,8 @@ pub(crate) fn get_target_ray_meshes(
 
     let mut ray_meshes: Vec<RayTargetMesh> = Vec::with_capacity(query.iter().len());
     for (transform, aabb, navstatic) in query.iter(){
-        let (shape, y) = RayTargetMeshShape::from_navstatic(*navstatic, *transform, aabb);
-        let rm = RayTargetMesh{y, shape, typ: navstatic.typ};
+        let (shape, ray_hit_height, vertex_height) = RayTargetMeshShape::from_navstatic(*navstatic, *transform, aabb);
+        let rm = RayTargetMesh{ray_hit_height, vertex_height, shape, typ: navstatic.typ};
         ray_meshes.push(rm);
     }
     ray_meshes.sort();

@@ -1,5 +1,5 @@
 use bevy::log::error_once;
-use bevy::prelude::{Vec2, Vec3Swizzles, error, Reflect};
+use bevy::prelude::{Vec2, Vec3Swizzles, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
 use serde::{Serialize, Deserialize};
