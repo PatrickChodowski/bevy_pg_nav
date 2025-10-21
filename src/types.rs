@@ -23,12 +23,13 @@ pub struct NavStatic {
 }
 impl NavStatic {
     pub fn navigable_rect(
-        dims: Vec2,
+        x: f32, 
+        y: f32,
         y_offset: f32
     ) -> Self {
         NavStatic {
             typ: NavStaticType::Navigable(y_offset),
-            shape: NavStaticShape::rect(dims)
+            shape: NavStaticShape::rect(Vec2::new(x,y))
         }
     }
 
@@ -43,11 +44,11 @@ impl NavStatic {
     }
 
     pub fn blocker_rect(
-        dims: Vec2
+        x: f32, y: f32
     ) -> Self {
         NavStatic{
             typ: NavStaticType::Blocker,
-            shape: NavStaticShape::rect(dims)
+            shape: NavStaticShape::rect(Vec2::new(x,y))
         }
     }
 
@@ -99,8 +100,8 @@ impl Default for NavDebug {
 
 #[derive(Debug)]
 pub(crate) enum RayTargetMeshShape {
-    Circle((Vec3, f32)), // Loc, radius, Vertex Height
-    Rect((Vec3, Vec3, Vec2))  // Loc, normal, Dimensions, Vertex Height
+    Circle((Vec3, f32)), // Loc, radius
+    Rect((Vec3, Vec3, Vec2, f32))  // Loc, normal, Dimensions, Z angle
 }
 impl RayTargetMeshShape{
     pub(crate) fn from_navstatic(
@@ -131,7 +132,12 @@ impl RayTargetMeshShape{
                 let initial_normal = Vec3::Z;
                 let rotated_normal = (transform.rotation * initial_normal).normalize();
                 let custom_aabb = AABB::from_loc_dims(transform.translation, dims*transform.scale.xy());
-                let shape = RayTargetMeshShape::Rect((transform.translation, rotated_normal, custom_aabb.dims()));
+                let shape = RayTargetMeshShape::Rect((
+                    transform.translation, 
+                    rotated_normal, 
+                    custom_aabb.dims(), 
+                    transform.rotation.to_euler(EulerRot::XYZ).2
+                ));
                 return (shape, ray_hit_height, vertex_height);
             }
             NavStaticShape::Circle(radius) => {
@@ -166,31 +172,29 @@ impl RayTargetMesh {
                 }
             }
 
-            RayTargetMeshShape::Rect((loc, norm, dims)) => {
-                let denom = norm.dot(Vec3::from(ray.direction));
-                // Check if the ray is parallel (denominator is too small)
+            RayTargetMeshShape::Rect((loc, norm, dims, y_angle)) => {
+                let plane_normal = norm.normalize();
+
+                let denom = plane_normal.dot(ray.direction.into());
                 if denom.abs() < 1e-6 {
-                    return None;
+                    return None; // Parallel
                 }
+
                 let t = (loc - Vec3::from(ray.origin)).dot(*norm)/denom;
-
-                // If t is negative, the intersection is behind the ray
                 if t < 0.0 {
-                    return None;
+                    return None; // Plane is behind the ray
                 }
-        
-                // Compute intersection point
-                let hit_point = Vec3::from(ray.origin + t * ray.direction);
-        
-                // Compute local axes of the rectangle (assuming normal is correct)
-                let right = norm.cross(Vec3::Z).normalize();
-                let up = right.cross(*norm).normalize();
-        
-                // Project hit_point onto rectangle's local axes
-                let local_x = (hit_point - loc).dot(right);
-                let local_z = (hit_point - loc).dot(up);
 
-                if local_x.abs() <= dims.x / 2.0 && local_z.abs() <= dims.y / 2.0 {
+                // Intersection point
+                let hit_point = Vec3::from(ray.origin + ray.direction * t);
+
+                // Transform hit point into rectangle local space
+                let rot = Quat::from_rotation_y(-y_angle);
+                let local_hit = rot * (hit_point - loc);
+                let half_w = dims.x * 0.5;
+                let half_d = dims.y * 0.5;
+
+                if local_hit.x.abs() <= half_w && local_hit.z.abs() <= half_d {
                     match self.typ {
                         NavStaticType::Blocker => {return Some(NavType::Blocker)}
                         NavStaticType::Navigable(_) => {return Some(NavType::Navigable)}
