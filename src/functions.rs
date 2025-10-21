@@ -131,10 +131,7 @@ pub(crate) fn find_neighbours(
 
     reference_quads.sort_by(|a, b| {a.index.partial_cmp(&b.index).unwrap()});
 
-    for a_quad in reference_quads.iter(){
-        if a_quad.typ == NavType::Blocker {
-            continue;
-        }   
+    for a_quad in reference_quads.iter(){ 
         let (a_edges, a_corners) = a_quad.aabb.edges_corners_2d();
         let quad_ref: &mut NavQuad = nav_quads.get_mut(&a_quad.index).unwrap();
         for b_quad in reference_quads.iter(){
