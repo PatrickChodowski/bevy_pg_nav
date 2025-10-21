@@ -18,7 +18,7 @@ use crate::functions::{
 };
 
 use crate::terrain::TerrainRayMeshData;
-use crate::types::{RayTargetMesh, NavQuad, Navigable, NavDebug, NavStatic};
+use crate::types::{RayTargetMesh, NavQuad, NavDebug, NavStatic};
 use crate::navmesh::NavMesh;
 
 pub struct PGNavPlugin;
@@ -65,7 +65,7 @@ fn generate_navmesh(
     mut events:     MessageReader<GenerateNavMesh>,
     mut commands:   Commands,
     meshes:         Res<Assets<Mesh>>,
-    mesh_query:     Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
+    mesh_query:     Query<(&Transform, &Aabb, &NavStatic)>,
     terrains:       Query<(&Transform, &Mesh3d, &Name)>,
     navconfig:      Res<NavConfig>
 ){
@@ -103,8 +103,8 @@ fn generate_navmesh(
             info!("[NAVMESH][GENERATE] DimX: ({})", max_x-min_x);
             info!("[NAVMESH][GENERATE] DimZ: ({})", max_z-min_z);
 
-            let ray_meshes: Vec<RayTargetMesh> = get_target_ray_meshes(&mesh_query, &navconfig);
-            info!("[NAVMESH][GENERATE] after generating ray meshes");
+            let ray_meshes: Vec<RayTargetMesh> = get_target_ray_meshes(&mesh_query);
+            info!("[NAVMESH][GENERATE] after generating ray target meshes");
 
             let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
             let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
@@ -122,12 +122,10 @@ fn generate_navmesh(
             );
 
             info!("[NAVMESH][GENERATE] after raycasts_rain: {}", dash_nav_quads.len());
-
             merge_by_groups(&mut dash_nav_quads);
 
             info!("[NAVMESH][GENERATE] after merge_by_groups: {}", dash_nav_quads.len());
             let mut quads_count: usize = dash_nav_quads.len();
-
             let mut nav_quads: HashMap<usize, NavQuad> = dash_nav_quads.clone().into_iter().map(|(_tile, quad)| (quad.index, quad)).collect();
 
             loop_merge_quads_directional(&mut nav_quads, &mut quads_count, navconfig.iter_count_limit);
@@ -187,8 +185,6 @@ fn debug(
 pub struct NavConfig{
     pub water_height: f32,
     pub raycast_step: u32,
-    pub blocker_scale: f32,
-    pub adjust_y: f32,
     pub offset_y: f32, // Offset on Display only
     pub iter_count_limit: usize,
     pub serialize: bool,
@@ -199,8 +195,6 @@ impl Default for NavConfig {
         NavConfig{
             water_height: 180.0,
             raycast_step: 10,
-            blocker_scale: 1.5,
-            adjust_y: 1.0,
             offset_y: 20.0,
             iter_count_limit: 20,
             serialize: true,

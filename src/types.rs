@@ -1,19 +1,92 @@
+use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
-
-#[allow(unused_imports)]
-use bevy::color::palettes::tailwind::{PURPLE_500, BLUE_500, GREEN_200, GREEN_500, YELLOW_500, RED_500};
+use bevy::color::palettes::tailwind::{BLUE_500, GREEN_500, YELLOW_500, RED_500};
 use serde::{Serialize, Deserialize};
 use std::cmp::Ordering;
 
 use crate::tools::NavRay;
 use crate::tools::AABB;
 
-use crate::plugin::NavConfig;
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum NavStaticType {
+    Navigable,
+    Blocker
+}
 
 
-#[derive(Component)]
-pub struct NavStatic;
+#[derive(Component, Clone, Copy)]
+pub struct NavStatic {
+    pub typ:    NavStaticType,
+    pub shape:  NavStaticShape
+}
+impl NavStatic {
+    pub fn navigable_rect(
+        dims: Vec2,
+        vertex_height: f32
+    ) -> Self {
+        NavStatic {
+            typ: NavStaticType::Navigable,
+            shape: NavStaticShape::rect(dims, vertex_height)
+        }
+    }
+
+    pub fn navigable_circle(
+        radius : f32,
+        vertex_height: f32
+    ) -> Self {
+        NavStatic{
+            typ: NavStaticType::Navigable,
+            shape: NavStaticShape::circle(radius, vertex_height)
+        }
+    }
+
+    pub fn blocker_rect(
+        dims: Vec2,
+        vertex_height: f32
+    ) -> Self {
+        NavStatic{
+            typ: NavStaticType::Blocker,
+            shape: NavStaticShape::rect(dims, vertex_height)
+        }
+    }
+
+    pub fn blocker_circle(
+        radius : f32,
+        vertex_height: f32
+    ) -> Self {
+        NavStatic{
+            typ: NavStaticType::Blocker,
+            shape: NavStaticShape::circle(radius, vertex_height)
+        }
+    }
+
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum NavStaticShape {
+    Circle((f32, f32)),      // radius, Vertex Height
+    Rect((Vec2, f32))  // normal, Dimensions, Vertex Height
+}
+
+impl NavStaticShape {
+    pub fn circle( 
+        radius: f32, 
+        vertex_height: f32
+    ) -> Self {
+        NavStaticShape::Circle((radius, vertex_height))
+    }
+    pub fn rect(
+        dims: Vec2,
+        vertex_height: f32
+    ) -> Self {
+        NavStaticShape::Rect((dims, vertex_height))
+    }
+}
+
+
+
 
 #[derive(Resource)]
 pub struct NavDebug {
@@ -27,24 +100,6 @@ impl Default for NavDebug {
     }
 }
 
-#[derive(Component, Reflect)]
-#[reflect(Component)]
-pub struct Navigable {
-    pub y: f32,
-    pub scale_width: f32
-}
-impl Navigable {
-    pub fn new(y: f32, scale_width: f32) -> Self {
-        return Navigable{y, scale_width};
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
-pub(crate) enum RayTargetMeshType {
-    Navigable,
-    #[default]
-    Blocker
-}
 
 #[derive(Debug)]
 pub(crate) enum RayTargetMeshShape {
@@ -52,28 +107,27 @@ pub(crate) enum RayTargetMeshShape {
     Rect((Vec3, Vec3, Vec2, f32))  // Loc, normal, Dimensions, Vertex Height
 }
 impl RayTargetMeshShape{
-    pub(crate) fn new(
-        typ: RayTargetMeshType, 
-        tr:  Transform, 
-        y: f32, 
-        aabb: &AABB,
-        navconfig: &Res<NavConfig>
-    ) -> Self {
-        match typ {
-            RayTargetMeshType::Navigable => {
-                let mut loc = tr.translation;
-                loc.y = y; // Actually 
+    pub(crate) fn from_navstatic(
+        navstatic:   NavStatic,
+        transform:   Transform, 
+        aabb:        &Aabb,
+        // Return self and height of the plane
+    ) -> (Self, f32) {
+        let dims = Vec3::from(aabb.half_extents)*transform.scale;
+        let aabb = AABB::from_loc_dims(transform.translation, dims.xz());
+        let height = dims.z*2.0;
+        let y: f32 = transform.translation.y + height;
+        match navstatic.shape {
+            NavStaticShape::Rect(_) => {
                 let initial_normal = Vec3::Z;
-                let rotated_normal = (tr.rotation * initial_normal).normalize();
-                return RayTargetMeshShape::Rect(
-                    (loc, rotated_normal, aabb.dims(), tr.translation.y)
-                );
+                let rotated_normal = (transform.rotation * initial_normal).normalize();
+                let shape = RayTargetMeshShape::Rect((transform.translation, rotated_normal, aabb.dims(), y));
+                return (shape, y);
             }
-            RayTargetMeshType::Blocker => {
-                let radius = aabb.max_edge()*navconfig.blocker_scale;
-                let mut loc = tr.translation;
-                loc.y = y;
-                return RayTargetMeshShape::Circle((loc, radius*radius, tr.translation.y));
+            NavStaticShape::Circle((radius, nav_y)) => {
+                let y = transform.translation.y + nav_y;
+                let shape = RayTargetMeshShape::Circle((transform.translation, radius, y));
+                return (shape, y);
             }
         }
     }
@@ -83,9 +137,9 @@ impl RayTargetMeshShape{
 
 #[derive(Debug)]
 pub(crate) struct RayTargetMesh {
-    pub y:         f32,
-    pub shape:     RayTargetMeshShape,
-    pub typ:       RayTargetMeshType
+    pub(crate) y:             f32, // Used for ordering
+    pub(crate) shape:     RayTargetMeshShape,
+    pub(crate) typ:       NavStaticType
 }
 impl RayTargetMesh {
 
@@ -96,8 +150,8 @@ impl RayTargetMesh {
                 let distance: f32 = ray.origin.xz().distance_squared(loc.xz());
                 if &distance <= radius {
                     match self.typ {
-                        RayTargetMeshType::Blocker => {return Some((*height, NavType::Blocker))}
-                        RayTargetMeshType::Navigable => {return Some((loc.y, NavType::Navigable))}
+                        NavStaticType::Blocker => {return Some((*height, NavType::Blocker))}
+                        NavStaticType::Navigable => {return Some((loc.y, NavType::Navigable))}
                     };
                 }
             }
@@ -128,8 +182,8 @@ impl RayTargetMesh {
 
                 if local_x.abs() <= dims.x / 2.0 && local_z.abs() <= dims.y / 2.0 {
                     match self.typ {
-                        RayTargetMeshType::Blocker => {return Some((*height, NavType::Blocker))}
-                        RayTargetMeshType::Navigable => {return Some((hit_point.y, NavType::Navigable))}
+                        NavStaticType::Blocker => {return Some((*height, NavType::Blocker))}
+                        NavStaticType::Navigable => {return Some((hit_point.y, NavType::Navigable))}
                     };
                 } else {
                     return None;
@@ -327,25 +381,6 @@ impl NavQuad {
             angle_b.partial_cmp(&angle_a).unwrap_or(std::cmp::Ordering::Equal)
         });
     }
-
-    // pub(crate) fn cleanup_vertices(&mut self) {
-    //     if self.vertices.len() == 4 {
-    //         self.sort_vertices();
-    //         return;
-    //     }
-    //     self.vertices.retain(|v| 
-    //         (
-    //             (v.x == self.aabb.min_x) | 
-    //             (v.x == self.aabb.max_x) 
-    //         )&
-    //         (
-    //             (v.z == self.aabb.max_z) | 
-    //             (v.z == self.aabb.min_z)
-    //         )
-    //     );
-
-    //     self.sort_vertices();
-    // }
 }
 
 

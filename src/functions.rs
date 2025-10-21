@@ -7,10 +7,8 @@ use rayon::prelude::*;
 use dashmap::DashMap;
 
 use crate::tools::NavRay;
-use crate::tools::AABB;
-use crate::types::{NavType, RayTargetMesh, Navigable, RayTargetMeshType, RayTargetMeshShape, QuadAABB, Neighbours, NavQuad, Edge, NavStatic};
+use crate::types::{Edge, NavQuad, NavStatic, NavType, Neighbours, QuadAABB, RayTargetMesh, RayTargetMeshShape};
 use crate::terrain::TerrainRayMeshData;
-use crate::plugin::NavConfig;
 
 
 // Should only be used in merge_by_groups
@@ -233,64 +231,17 @@ pub(crate) fn raycasts_rain(
 
 
 pub(crate) fn get_target_ray_meshes(
-    mesh_query:     &Query<(&Transform, &Name, &Aabb, Option<&Navigable>), With<NavStatic>>,
-    navconfig:      &Res<NavConfig>
-) -> Vec<RayTargetMesh>{
+    query:     &Query<(&Transform, &Aabb, &NavStatic)>
+) -> Vec<RayTargetMesh> {
 
-    let count = mesh_query.iter().len();
-    let adjust_y: f32 = navconfig.adjust_y;
-    let mut ray_meshes: Vec<RayTargetMesh> = Vec::with_capacity(count);
-
-    for (transform, name, aabb, navigable) in mesh_query.iter(){
-
-        // let mut sm = SortMesh::new(mesh.clone(), name.clone(), *transform);
-        let mut dims = Vec3::from(aabb.half_extents)*transform.scale;
-        if let Some(navigable) = navigable {
-            dims.x *= navigable.scale_width;
-        }
-        let aabb = AABB {
-            min_x: transform.translation.x - dims.x,
-            max_x: transform.translation.x + dims.x,
-            min_z: transform.translation.z - dims.y,
-            max_z: transform.translation.z + dims.y,
-        };
-        let height = dims.z*2.0;
-        let y: f32;
-        let rm_typ: RayTargetMeshType;
-
-        if let Some(navigable) = navigable {
-            y = transform.translation.y + navigable.y;
-            rm_typ = RayTargetMeshType::Navigable;
-        } else {
-            y = transform.translation.y + height - adjust_y;
-            rm_typ = RayTargetMeshType::Blocker;
-        }
-
-        let rm = RayTargetMesh{
-            y,
-            shape: RayTargetMeshShape::new(rm_typ, *transform, y, &aabb, navconfig),
-            typ: rm_typ
-        };
-
-        // Adjust the mesh after all the information known
+    let mut ray_meshes: Vec<RayTargetMesh> = Vec::with_capacity(query.iter().len());
+    for (transform, aabb, navstatic) in query.iter(){
+        let (shape, y) = RayTargetMeshShape::from_navstatic(*navstatic, *transform, aabb);
+        let rm = RayTargetMesh{y, shape, typ: navstatic.typ};
         ray_meshes.push(rm);
-        
     }
-
     ray_meshes.sort();
-    
-    // move terrain to the last
-    if ray_meshes.len() > 0 {
-        let first: RayTargetMesh = ray_meshes.remove(0);
-        ray_meshes.push(first);
-    }
-
     info!("[NAVMESH] RayMeshes count: {}", ray_meshes.len());
-
-    // for sm in ray_meshes.iter(){
-    //     info!("{}   {:?}", sm.name, sm.typ);
-    // }
-
     return ray_meshes;
 }
 
@@ -301,7 +252,6 @@ pub(crate) fn loop_merge_quads_directional(
     quads_count:    &mut usize,
     limit:          usize
 ){
-
     let mut i: usize = 0;
     loop {
         *quads_count = nav_quads.len();
@@ -454,28 +404,3 @@ fn lines_intersection(
 fn _cross(v1: Vec2, v2: Vec2) -> f32 {
     v1.x * v2.y - v1.y * v2.x
 }
-
-
-
-// fn quads_bounding_box(aabbs: &Vec<QuadAABB>) -> bool {
-//     let mut main_aabb: QuadAABB = QuadAABB::default_big();
-//     let mut total_area: f32 = 0.0;
-
-//     for aabb in aabbs.iter(){
-//         main_aabb.min_x = main_aabb.min_x.min(aabb.min_x);
-//         main_aabb.max_x = main_aabb.max_x.max(aabb.max_x);
-//         main_aabb.min_z = main_aabb.min_z.min(aabb.min_z);
-//         main_aabb.max_z = main_aabb.max_z.max(aabb.max_z);
-//         total_area += aabb.area();
-//     }
-
-//     let bounding_box_area = main_aabb.area();
-
-//     // info!("total area: {} bb: {}", total_area, bounding_box_area);
-//     if (total_area as u32) == (bounding_box_area as u32) {
-//         // info!("Bounding box area: {} total area: {}", bounding_box_area, total_area);
-//         return true;
-//     }
-
-//     return false;
-// }
