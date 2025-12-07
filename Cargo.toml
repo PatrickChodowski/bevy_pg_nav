@@ -1,6 +1,6 @@
 [package]
 name = "bevy_pg_nav"
-version = "1.17.0"
+version = "1.17.1"
 edition = "2024"
 description = "PG (PatchGames) Navigation to be used with Bevy"
 license = "MIT OR Apache-2.0"

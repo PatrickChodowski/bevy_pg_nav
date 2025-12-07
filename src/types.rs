@@ -16,7 +16,7 @@ pub enum NavStaticType {
 }
 
 
-#[derive(Component, Clone, Copy)]
+[derive(Component, Clone, Copy)]
 pub struct NavStatic {
     pub typ:    NavStaticType,
     pub shape:  NavStaticShape
@@ -498,16 +498,82 @@ impl QuadAABB {
     //     return normal;
     // }
 
+    pub fn _ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<f32> {
+        if let Some(t) = ray_triangle_intersection(
+            origin,
+            direction,
+            self.min_x_min_z,
+            self.max_x_min_z,
+            self.min_x_max_z,
+        ) {
+            return Some(t);
+        }
 
-    pub fn ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<f32> {
+        ray_triangle_intersection(
+            origin,
+            direction,
+            self.max_x_min_z,
+            self.max_x_max_z,
+            self.min_x_max_z,
+        )
+
+    }
+
+    fn ray_triangle_intersection(
+        origin: Vec3A,
+        direction: Vec3A,
+        v0: Vec3A,
+        v1: Vec3A,
+        v2: Vec3A,
+    ) -> Option<f32> {
+        const EPSILON: f32 = 0.0000001;
+        
+        let edge1 = v1 - v0;
+        let edge2 = v2 - v0;
+        let h = direction.cross(edge2);
+        let a = edge1.dot(h);
+        
+        // Ray is parallel to triangle
+        if a > -EPSILON && a < EPSILON {
+            return None;
+        }
+        
+        let f = 1.0 / a;
+        let s = origin - v0;
+        let u = f * s.dot(h);
+        
+        if u < 0.0 || u > 1.0 {
+            return None;
+        }
+        
+        let q = s.cross(edge1);
+        let v = f * direction.dot(q);
+        
+        if v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+        
+        // Calculate t (distance along ray)
+        let t = f * edge2.dot(q);
+        
+        if t > EPSILON {
+            Some(t)
+        } else {
+            None
+        }
+    }
+
+    pub fn _ray_intersection(&self, origin: Vec3A, direction: Vec3A) -> Option<f32> {
+
+        info!("origin: {}", origin);
 
         let min_corner = self.min_x_min_z;
         let max_corner = self.max_x_max_z;
     
         let inv_dir = direction.recip();
         
-        let t1 = (min_corner - origin) * inv_dir;
-        let t2 = (max_corner - origin) * inv_dir;
+        let t1: Vec3A = (min_corner - origin) * inv_dir;
+        let t2: Vec3A = (max_corner - origin) * inv_dir;
         
         let t_min = Vec3A::min(t1, t2);
         let t_max = Vec3A::max(t1, t2);
