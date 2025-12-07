@@ -35,7 +35,8 @@ impl QuadsGroupToMerge {
         if typ == &NavType::Terrain {
             // Check normals:
             let first = self.normals[0];
-            let normals_eq = self.normals.iter().all(|&v| v == first);//.length_squared() <= NORMAL_EPSILON_DIFF);
+            // let normals_eq = self.normals.iter().all(|&v| v == first);//.length_squared() <= NORMAL_EPSILON_DIFF);
+            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= 0.0001);
             if !normals_eq {
                 return false;
             } 
@@ -152,7 +153,7 @@ pub(crate) fn find_neighbours(
 pub(crate) fn raycasts_rain(
     xs:             &Vec<f32>,
     zs:             &Vec<f32>,
-    ray_meshes:     &Vec<RayTargetMesh>,
+    ray_target_meshes:     &Vec<RayTargetMesh>,
     trmd:           &TerrainRayMeshData,
     water_height:   f32,
     extent:         f32
@@ -176,7 +177,7 @@ pub(crate) fn raycasts_rain(
             let mut quad_normal: Vec3A = normal.into();
 
             // Check against blockers and navigables
-            for rm in ray_meshes.iter(){
+            for rm in ray_target_meshes.iter(){
                 if let Some(nvt) = rm.test(&ray){
                     if rm.vertex_height > height {
                         height = rm.vertex_height; // Update, Only if its above the terrain height in that point

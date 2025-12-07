@@ -10,7 +10,7 @@ use serde::{Serialize,Deserialize};
 use crate::pathfinding::{PathFinder, Path, SearchStep};
 use crate::types::{NavQuad, NavType, Neighbours, QuadAABB};
 
-const ORIGIN_HEIGHT: f32 = 1000.0;
+pub(crate) const ORIGIN_HEIGHT: f32 = 1000.0;
 const VERTEX_SIMILARITY_THRESHOLD: f32 = 1.0;
 
 #[derive(Resource, Clone, Debug, Serialize, Deserialize, bevy::asset::Asset, bevy::reflect::TypePath)]
