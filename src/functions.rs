@@ -11,7 +11,7 @@ use crate::types::{Edge, NavQuad, NavStatic, NavType, Neighbours, QuadAABB, RayT
 use crate::terrain::TerrainRayMeshData;
 
 
-const NORMAL_EPSILON_DIFF: f32 = 0.0;
+const NORMAL_EPSILON_DIFF: f32 = 0.0001;
 
 // Should only be used in merge_by_groups
 struct QuadsGroupToMerge {
@@ -35,7 +35,7 @@ impl QuadsGroupToMerge {
         if typ == &NavType::Terrain {
             // Check normals:
             let first = self.normals[0];
-            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= NORMAL_EPSILON_DIFF * NORMAL_EPSILON_DIFF);
+            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= NORMAL_EPSILON_DIFF);
             if !normals_eq {
                 return false;
             } 
@@ -321,7 +321,7 @@ fn merge_quads_directional(
             }
 
             // if a_quad.normal != b_quad.normal {
-            if a_quad.normal.distance(b_quad.normal) > 0.1 {
+            if a_quad.normal.distance(b_quad.normal) > NORMAL_EPSILON_DIFF {
                 continue;
             }
 
