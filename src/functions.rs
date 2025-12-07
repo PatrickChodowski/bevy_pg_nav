@@ -2,6 +2,7 @@
 use bevy::{prelude::*, camera::primitives::Aabb};
 use bevy::platform::collections::{HashSet, HashMap};
 use core::f32;
+use std::f32::EPSILON;
 use std::usize;
 use rayon::prelude::*;
 use dashmap::DashMap;
@@ -36,7 +37,7 @@ impl QuadsGroupToMerge {
             // Check normals:
             let first = self.normals[0];
             // let normals_eq = self.normals.iter().all(|&v| v == first);//.length_squared() <= NORMAL_EPSILON_DIFF);
-            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= 0.0001);
+            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= EPSILON);
             if !normals_eq {
                 return false;
             } 
@@ -73,6 +74,7 @@ pub(crate) fn merge_by_groups(
     nav_quads: &mut  DashMap<usize, NavQuad>
 ){
 
+    info!("[NAVMESH] Number of NavQuds before merging by groups: {}", nav_quads.len());
     // let reference_quads = nav_quads.clone();
     let groups: DashMap<usize, QuadsGroupToMerge> = DashMap::with_capacity(100000);
 
@@ -101,11 +103,11 @@ pub(crate) fn merge_by_groups(
     // Check which groups can be merged and merge them
     groups.par_iter_mut().for_each(|group_entry| {
 
-        info!("checking group entry: {}", group_entry.group_id);
+        // info!("checking group entry: {}", group_entry.group_id);
         let gtm = group_entry.value();
 
         if gtm.is_heterogonus() == false{
-            info!("group {} is NOT heterogonus, returning", group_entry.group_id);
+            // info!("group {} is NOT heterogonus, returning", group_entry.group_id);
             return;
         }
 
@@ -113,7 +115,7 @@ pub(crate) fn merge_by_groups(
         for old_index in gtm.indexes.iter(){
             nav_quads.remove(old_index);
         }
-        info!("group {} is heterogonus, merging old indexes ({}) into {}", group_entry.group_id, gtm.indexes.len(), new_index);
+        // info!("group {} is heterogonus, merging old indexes ({}) into {}", group_entry.group_id, gtm.indexes.len(), new_index);
         nav_quads.insert(new_index, new_quad);
 
     });

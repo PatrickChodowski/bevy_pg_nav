@@ -112,9 +112,9 @@ fn raycast_moller_trumbore(
 
 #[derive(Debug, Clone)]
 pub struct IntersectionData {
-    normal: Vec3,
-    distance: f32,
-    triangle_index: usize
+    pub normal: Vec3,
+    pub distance: f32,
+    pub triangle_index: usize
 }
 
 impl IntersectionData {
@@ -127,23 +127,6 @@ impl IntersectionData {
             distance,
             triangle_index
         }
-    }
-
-    /// Get the intersection data's normal.
-    #[must_use]
-    pub fn normal(&self) -> Vec3 {
-        self.normal
-    }
-
-    /// Get the intersection data's distance.
-    #[must_use]
-    pub fn distance(&self) -> f32 {
-        self.distance
-    }
-    
-    #[must_use]
-    pub fn triangle_index(&self) -> usize {
-        self.triangle_index
     }
 }
 

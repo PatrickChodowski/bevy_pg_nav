@@ -26,6 +26,7 @@ pub struct PGNavPlugin;
 impl Plugin for PGNavPlugin {
     fn build(&self, app: &mut App) {
         app
+        .init_asset::<NavMesh>()
         .add_message::<GenerateNavMesh>()
         .add_plugins(JsonAssetPlugin::<NavMesh>::new(&["navmesh.json"]))
         .insert_resource(NavConfig::default())
@@ -112,55 +113,55 @@ fn generate_navmesh(
             let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
             let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
 
-            let mut dash_nav_quads: DashMap<usize, NavQuad> = raycasts_rain(
-                &xs,
-                &zs, 
-                &ray_meshes, 
-                &trmd,
-                water_height,
-                extent
-            );
+            // let mut dash_nav_quads: DashMap<usize, NavQuad> = raycasts_rain(
+            //     &xs,
+            //     &zs, 
+            //     &ray_meshes, 
+            //     &trmd,
+            //     water_height,
+            //     extent
+            // );
 
-            info!("[NAVMESH][GENERATE] after raycasts_rain: {}", dash_nav_quads.len());
-            merge_by_groups(&mut dash_nav_quads);
+            // info!("[NAVMESH][GENERATE] after raycasts_rain: {}", dash_nav_quads.len());
+            // merge_by_groups(&mut dash_nav_quads);
 
-            info!("[NAVMESH][GENERATE] after merge_by_groups: {}", dash_nav_quads.len());
-            let mut quads_count: usize = dash_nav_quads.len();
-            let mut nav_quads: HashMap<usize, NavQuad> = dash_nav_quads.clone().into_iter().map(|(_tile, quad)| (quad.index, quad)).collect();
+            // info!("[NAVMESH][GENERATE] after merge_by_groups: {}", dash_nav_quads.len());
+            // let mut quads_count: usize = dash_nav_quads.len();
+            // let mut nav_quads: HashMap<usize, NavQuad> = dash_nav_quads.clone().into_iter().map(|(_tile, quad)| (quad.index, quad)).collect();
 
-            loop_merge_quads_directional(&mut nav_quads, &mut quads_count, navconfig.iter_count_limit);
-            info!("[NAVMESH][GENERATE] after loop_merge_quads_directional: {}", nav_quads.len());
+            // loop_merge_quads_directional(&mut nav_quads, &mut quads_count, navconfig.iter_count_limit);
+            // info!("[NAVMESH][GENERATE] after loop_merge_quads_directional: {}", nav_quads.len());
 
-            find_neighbours(&mut nav_quads);
-            info!("[NAVMESH][GENERATE] after find_neighbours");
+            // find_neighbours(&mut nav_quads);
+            // info!("[NAVMESH][GENERATE] after find_neighbours");
 
-            navmesh_done = true;
-            let mut navmesh = NavMesh::from_hash_navquads(&mut nav_quads);
-            navmesh.water_height = navconfig.water_height;
-            info!("[NAVMESH][GENERATE] NavMesh Polygon count: {} ", navmesh.polygons.len());
-            info!("[NAVMESH][GENERATE] NavMesh Vertex count: {} ", navmesh.vertices.len());
+            // navmesh_done = true;
+            // let mut navmesh = NavMesh::from_hash_navquads(&mut nav_quads);
+            // navmesh.water_height = navconfig.water_height;
+            // info!("[NAVMESH][GENERATE] NavMesh Polygon count: {} ", navmesh.polygons.len());
+            // info!("[NAVMESH][GENERATE] NavMesh Vertex count: {} ", navmesh.vertices.len());
 
-            commands.insert_resource(NavDebug{hit_quad_id: None});
-            commands.insert_resource(navmesh.clone());
+            // commands.insert_resource(NavDebug{hit_quad_id: None});
+            // commands.insert_resource(navmesh.clone());
 
-            if navconfig.serialize {
-                info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", ev.map_name, ev.chunk_id);
-                let filename = format!("./assets/navmesh/{}_{}.navmesh.json", ev.map_name, ev.chunk_id);
-                IoTaskPool::get().spawn(async move {
-                    let f = File::create(&filename).ok().unwrap();
-                    let mut writer = BufWriter::new(f);
-                    let _res = serde_json::to_writer(&mut writer, &navmesh);
-                    let _res = writer.flush();
-                })
-                .detach();
-            }
+            // if navconfig.serialize {
+            //     info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", ev.map_name, ev.chunk_id);
+            //     let filename = format!("./assets/navmesh/{}_{}.navmesh.json", ev.map_name, ev.chunk_id);
+            //     IoTaskPool::get().spawn(async move {
+            //         let f = File::create(&filename).ok().unwrap();
+            //         let mut writer = BufWriter::new(f);
+            //         let _res = serde_json::to_writer(&mut writer, &navmesh);
+            //         let _res = writer.flush();
+            //     })
+            //     .detach();
+            // }
 
         }
 
-        if !navmesh_done {
-            // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
-            commands.write_message(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
-        }
+        // if !navmesh_done {
+        //     // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
+        //     commands.write_message(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
+        // }
     }
 }
 

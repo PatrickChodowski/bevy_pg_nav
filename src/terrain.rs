@@ -31,15 +31,17 @@ impl TerrainRayMeshData {
 
     pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
         if let Some(intersection_data) = self.ray_intersection(ray){
-            let dist = intersection_data.distance().round() as i32;
+            let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
 
-            let mut group_id = intersection_data.triangle_index();
+            let mut group_id = intersection_data.triangle_index;
             if let Some(mapping) = self.quads_mapping.get(&group_id){
                 group_id = *mapping;
+            } else {
+                info!("not mapped: {}", group_id);
             }
 
-            return Some((height, group_id, intersection_data.normal()));
+            return Some((height, group_id, intersection_data.normal));
         } else {
             return None;
         }
@@ -84,13 +86,7 @@ impl TerrainRayMeshData {
                             Vec3A::from(vertex_normals[index[2] as usize]),
                         ];
                         tri_pos.push(tri_vertex_positions);
-
-                        if (tvn[0] == tvn[1]) & (tvn[0] == tvn[2]){
-                            tri_norm.push(tvn[0]);
-                        } else{
-                            panic!("TRI FAILS on normals");
-                        }
-
+                        tri_norm.push(triangle_normal(&tvn[0], &tvn[1], &tvn[2]));
                     }
                 }
                 Indices::U32(vertex_indices) => {
@@ -106,12 +102,7 @@ impl TerrainRayMeshData {
                             Vec3A::from(vertex_normals[index[2] as usize]),
                         ];
                         tri_pos.push(tri_vertex_positions);
-                        if (tvn[0] == tvn[1]) & (tvn[0] == tvn[2]){
-                            tri_norm.push(tvn[0]);
-                        } else{
-                            panic!("TRI FAILS on normals");
-                        }
-
+                        tri_norm.push(triangle_normal(&tvn[0], &tvn[1], &tvn[2]));
                     }
                 }
             }
@@ -129,9 +120,27 @@ impl TerrainRayMeshData {
 
         trmd.map_quads();
 
-        info!("[NAVMESH][TERRAIN] Count of Mapped triangles: {}, groups: {}", 
+        for a_tri in 0..trmd.triangle_count {
+            let positions = trmd.vertex_positions[a_tri];
+            for pos in positions.iter(){
+                if pos.y >= 210.0 {
+                    info!("Above 210: {} normal: {} mapping: {:?} positions: {:?}", a_tri, trmd.normal(a_tri), trmd.quads_mapping.get(&a_tri), positions);
+                    break;
+                }
+            }
+        }
+
+        // Looks like its only an issue for edges of the mesh?
+        // for a_tri in 0..trmd.triangle_count {
+        //     if !trmd.quads_mapping.contains_key(&a_tri) {
+        //         info!("Triangle not in mapping: {}, norma: {:?}, pos: {:?}, is_right: {}", a_tri, trmd.normal(a_tri), trmd.positions(a_tri), trmd.is_right(a_tri));
+        //     }
+        // }
+
+        info!("[NAVMESH][TERRAIN] Count of Mapped triangles: {}, groups: {}, mesh triangle count: {}", 
             trmd.quads_mapping.len(),
-            trmd.quads_mapping.len()/2
+            trmd.quads_mapping.len()/2,
+            triangle_count
         );
 
         return trmd;
@@ -183,6 +192,11 @@ impl TerrainRayMeshData {
 
     fn normal(&self, triangle_id: usize) -> Vec3A {
         return self.vertex_normals[triangle_id];
+    }
+
+
+    fn positions(&self, triangle_id: usize) -> [Vec3A;3] {
+        return self.vertex_positions[triangle_id];
     }
 
     fn get_longest_side_points(&self, triangle_id: usize) -> [Vec3A; 2] {
@@ -270,4 +284,11 @@ impl TerrainRayMeshData {
 
         return None;
     }
+}
+
+
+fn triangle_normal(
+    n_a: &Vec3A, n_b: &Vec3A, n_c: &Vec3A
+) -> Vec3A {
+    (n_a + n_b + n_c).normalize()
 }
