@@ -35,7 +35,7 @@ impl QuadsGroupToMerge {
         if typ == &NavType::Terrain {
             // Check normals:
             let first = self.normals[0];
-            let normals_eq = self.normals.iter().all(|&v| (v - first).length_squared() <= NORMAL_EPSILON_DIFF);
+            let normals_eq = self.normals.iter().all(|&v| v == first);//.length_squared() <= NORMAL_EPSILON_DIFF);
             if !normals_eq {
                 return false;
             } 
@@ -320,10 +320,12 @@ fn merge_quads_directional(
                 continue;
             }
 
-            // if a_quad.normal != b_quad.normal {
-            if a_quad.normal.distance(b_quad.normal) > NORMAL_EPSILON_DIFF {
+            if a_quad.normal != b_quad.normal {
                 continue;
             }
+            // if a_quad.normal.distance(b_quad.normal) > NORMAL_EPSILON_DIFF {
+            //     continue;
+            // }
 
             // if let Some(edge) = a_quad.aabb.get_identical_edge(&b_quad.aabb){
             if let Some(edge) = a_quad.aabb.check_edge(&b_quad.aabb, edge){
