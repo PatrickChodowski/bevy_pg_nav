@@ -101,9 +101,11 @@ pub(crate) fn merge_by_groups(
     // Check which groups can be merged and merge them
     groups.par_iter_mut().for_each(|group_entry| {
 
+        info!("checking group entry: {}", group_entry.group_id);
         let gtm = group_entry.value();
 
-        if !gtm.is_heterogonus(){
+        if gtm.is_heterogonus() == false{
+            info!("group {} is NOT heterogonus, returning", group_entry.group_id);
             return;
         }
 
@@ -111,6 +113,7 @@ pub(crate) fn merge_by_groups(
         for old_index in gtm.indexes.iter(){
             nav_quads.remove(old_index);
         }
+        info!("group {} is heterogonus, merging old indexes ({}) into {}", group_entry.group_id, gtm.indexes.len(), new_index);
         nav_quads.insert(new_index, new_quad);
 
     });
