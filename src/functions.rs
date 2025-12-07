@@ -11,7 +11,7 @@ use crate::types::{Edge, NavQuad, NavStatic, NavType, Neighbours, QuadAABB, RayT
 use crate::terrain::TerrainRayMeshData;
 
 
-const NORMAL_EPSILON_DIFF: f32 = 0.0001;
+const NORMAL_EPSILON_DIFF: f32 = 0.000001;
 
 // Should only be used in merge_by_groups
 struct QuadsGroupToMerge {
