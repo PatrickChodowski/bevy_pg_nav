@@ -8,7 +8,8 @@ use rayon::prelude::*;
 use dashmap::DashMap;
 
 use crate::tools::NavRay;
-use crate::types::{Edge, NavQuad, NavStatic, NavType, Neighbours, QuadAABB, RayTargetMesh, RayTargetMeshShape};
+use crate::types::{Edge, NavStatic, NavType, Neighbours, RayTargetMesh, RayTargetMeshShape, NavQuad, QuadAABB};
+use crate::triangles::NavPolygon;
 use crate::terrain::TerrainRayMeshData;
 
 

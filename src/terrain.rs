@@ -6,6 +6,9 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::platform::collections::{HashMap, HashSet};
 
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
+use crate::triangles::NavPolygon;
+use crate::types::NavType;
+use crate::types::Neighbours;
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone)]
@@ -16,7 +19,7 @@ pub(crate) struct TerrainRayMeshData {
     triangle_count:            usize,
     pub vertices:              Vec<Vec3A>,
     pub edges:                 HashSet<(usize, usize)>,
-    quads_mapping:             HashMap<usize, usize> // Pairs of triangles that are making a quad
+    // quads_mapping:             HashMap<usize, usize> // Pairs of triangles that are making a quad
 }
 impl TerrainRayMeshData {
     pub(crate)  fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
@@ -35,12 +38,7 @@ impl TerrainRayMeshData {
         if let Some(intersection_data) = self.ray_intersection(ray){
             let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
-
-            let mut group_id = intersection_data.triangle_index;
-            if let Some(mapping) = self.quads_mapping.get(&group_id){
-                group_id = *mapping;
-            } 
-            return Some((height, group_id, intersection_data.normal));
+            return Some((height, intersection_data.triangle_index, intersection_data.normal));
         } else {
             return None;
         }
@@ -133,10 +131,10 @@ impl TerrainRayMeshData {
             triangle_count,
             vertices,
             edges,
-            quads_mapping: HashMap::new()
+            // quads_mapping: HashMap::new()
         };
 
-        trmd.map_quads();
+        // trmd.map_quads();
 
         // for a_tri in 0..trmd.triangle_count {
         //     let positions = trmd.vertex_positions[a_tri];
@@ -158,15 +156,44 @@ impl TerrainRayMeshData {
         //     }
         // }
 
-        info!("[NAVMESH][TERRAIN] Count of Mapped triangles: {}, groups: {}, mesh triangle count: {}", 
-            trmd.quads_mapping.len(),
-            trmd.quads_mapping.len()/2,
-            triangle_count
-        );
+        // info!("[NAVMESH][TERRAIN] Count of Mapped triangles: {}, groups: {}, mesh triangle count: {}", 
+        //     trmd.quads_mapping.len(),
+        //     trmd.quads_mapping.len()/2,
+        //     triangle_count
+        // );
 
         return trmd;
 
     }
+
+    pub fn vertices_to_navpolygons(&self, start_index: usize) -> Vec<NavPolygon> {
+        let mut polys: Vec<NavPolygon> = Vec::with_capacity(self.vertices.len());
+        let mut index = start_index;
+        let invert = Vec3A::new(-1.0, 1.0, -1.0);
+        for t in 0..self.triangle_count{
+            index += 1;
+            let tri_vertices = self.triangle_positions(t);
+            let tri_normal = self.triangle_normal(t);
+
+            for vertex in tri_vertices.iter(){
+                let t_vertex = vec![self.mesh_transform.transform_point3a(*vertex)*invert];
+                // info!("{:?}", t_vertex);
+
+                let np = NavPolygon{
+                    group_id: t,
+                    loc: *vertex,
+                    index,
+                    vertices: t_vertex,
+                    normal: tri_normal,
+                    typ: NavType::Terrain,
+                    neighbours: Neighbours::default()
+                };
+                polys.push(np);
+            }
+        }
+        return polys;
+    }
+
 
     fn map_quads(&mut self){
         let mut quads_mapping: HashMap<usize, usize> = HashMap::with_capacity(self.triangle_count);
@@ -208,7 +235,7 @@ impl TerrainRayMeshData {
                 }
             }
         }
-        self.quads_mapping = quads_mapping;
+        // self.quads_mapping = quads_mapping;
     }
 
     fn triangle_normal(&self, triangle_id: usize) -> Vec3A {
@@ -267,7 +294,7 @@ impl TerrainRayMeshData {
 
 
 
-
+    // Tests against all triangles of the mesh
     fn ray_intersection(
         &self, 
         ray: &NavRay

@@ -1,5 +1,6 @@
 
 use bevy::prelude::*;
+use itertools::Itertools;
 use serde::{Serialize, Deserialize};
 use bevy::camera::primitives::Aabb;
 use bevy::platform::collections::HashMap;
@@ -15,12 +16,14 @@ use geo::BooleanOps;
 
 use geo_booleanop::boolean::BooleanOp;
 
-use crate::functions::{
-    find_neighbours, 
+use crate::triangles::NavPolygon;
+use crate::functions::get_target_ray_meshes;
+
+use crate::triangles::{
+    // find_neighbours, 
     merge_by_groups,
-    get_target_ray_meshes, 
     raycasts_rain,
-    loop_merge_quads_directional
+    // loop_merge_quads_directional
 };
 
 use crate::terrain::TerrainRayMeshData;
@@ -41,7 +44,7 @@ impl Plugin for PGNavPlugin {
         .add_systems(PreUpdate, generate_navmesh.run_if(on_message::<GenerateNavMesh>))
         // .add_systems(Update, debug)
 
-        .add_systems(Update, debug_triangulation.run_if(resource_exists::<DebugTriangulation>))
+        .add_systems(Update, debug_triangulation.run_if(resource_exists::<DebugTriangulation1>))
         ;
     }
 }
@@ -74,24 +77,41 @@ use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
 use ordered_float::OrderedFloat;
 
 #[derive(Resource)]
-pub struct DebugTriangulation {
-    pub faces: Vec<[Vec3;3]>
+pub struct DebugTriangulation1 {
+    pub data: HashMap<usize, NavPolygon>
 }
-use bevy::color::palettes::css::WHITE;
+
+
+#[derive(Resource)]
+pub struct DebugTriangulation {
+    pub faces: Vec<[Vec3;4]>
+}
+use bevy::color::palettes::css::{WHITE, RED};
 fn debug_triangulation(
-    data: Res<DebugTriangulation>,
+    data: Res<DebugTriangulation1>,
     mut gizmos: Gizmos,
 ){
     let clr: Color= Color::from(WHITE);
+    let center_clr = Color::from(RED);
 
-    for face in data.faces.iter(){
-        let a = face[0];
-        let b = face[1];
-        let c = face[2];
+    for (key, nav_polygon) in data.data.iter(){
 
-        gizmos.line(a, b, clr);
-        gizmos.line(b, c, clr);
-        gizmos.line(c, a, clr);
+
+        for pair in nav_polygon.vertices.windows(2){
+            gizmos.line(pair[0].into(), pair[1].into(), clr);
+        }
+
+
+        // let a = face[0];
+        // let b = face[1];
+        // let c = face[2];
+        // let center = face[3];
+
+        // gizmos.line(a, b, clr);
+        // gizmos.line(b, c, clr);
+        // gizmos.line(c, a, clr);
+
+        // gizmos.circle(Isometry3d::from_translation(center), 3.0, center_clr);
 
     }
 }
@@ -143,179 +163,167 @@ fn generate_navmesh(
 
             // SPADE APPROACH 
 
-            let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
+            // let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
 
-            for (index, vertex) in trmd.vertices.iter().enumerate(){
-                let tvex = trmd.mesh_transform.transform_point3a(*vertex);
-                let point = Point2::new(tvex.x as f64*-1.0, tvex.z as f64*-1.0);
-                let handle = cdt.insert(point).unwrap();
+            // for (index, vertex) in trmd.vertices.iter().enumerate(){
+            //     let tvex = trmd.mesh_transform.transform_point3a(*vertex);
+            //     let point = Point2::new(tvex.x as f64*-1.0, tvex.z as f64*-1.0);
+            //     let handle = cdt.insert(point).unwrap();
+            // }
+
+            // let mut polygons: Vec<Polygon> = Vec::new();
+            // for ray_mesh in ray_meshes.iter(){
+            //     if ray_mesh.typ == NavStaticType::Blocker {
+            //         let polygon = ray_mesh.shape.to_geo_polygon();
+            //         polygons.push(polygon)
+            //     }
+            // }
+            // // info!("Initial Polygons count: {}", polygons.len());
+
+            // loop {
+            //     let mut pairs: Vec<(Polygon, Polygon)> = Vec::new();
+            //     let mut used: Vec<usize> = Vec::new();
+
+            //     for (index1, poly1) in polygons.iter().enumerate(){
+            //         if used.contains(&index1){
+            //             continue;
+            //         }
+            //         for (index2, poly2) in polygons.iter().enumerate(){
+
+            //             if used.contains(&index2){
+            //                 continue;
+            //             }
+
+            //             if index1 == index2 {
+            //                 continue;
+            //             }
+
+            //             if poly1.intersects(poly2){
+            //                 pairs.push((poly1.clone(), poly2.clone()));
+            //                 used.push(index1);
+            //                 used.push(index2);
+            //             }
+            //         }
+            //     }
+            //     // info!("Pairs count: {}", pairs.len());
+            //     if pairs.len() == 0 {
+            //         break; // Exit loop if no more intersections
+            //     }
+            //     // Merge pairs
+            //     for (poly1, poly2) in pairs.iter(){
+
+            //         let unioned_multi = poly1.union(poly2);
+            //         if unioned_multi.0.len() > 1 {
+            //             info!("unioned multi has more than one polygon: {}", unioned_multi.0.len());
+            //         }
+
+            //         let unioned_polygon: Polygon = unioned_multi.0[0].clone();
+            //         polygons.retain(|p| (p != poly1) & (p != poly2));
+            //         polygons.push(unioned_polygon);
+            //     }
+            //     // info!("Polygons count: {}", polygons.len());
+            // }
+
+
+            // for polygon in polygons.iter(){
+            //     if let Ok(ace)  = cdt.add_constraint_edges(polygon.exterior().0.iter().map(|p| Point2::new(p.x, p.y)), true) {
+            //         // info!("Correctly added edges: {:?}", ace);
+            //     } else {
+            //         info!("ISSUE ADDING EDGES");
+            //     }
+            
+            // }
+
+            // let num_faces = cdt.num_all_faces();
+            // info!("NUM FACES: {}", num_faces);
+
+            // let mut faces: Vec<[Vec3; 4]> = Vec::new();
+
+            // let outer_face = cdt.outer_face();
+
+            // // outer_face.
+
+
+            // for face in cdt.inner_faces(){
+            //     let vertices = face.vertices();
+            //     let mut face_points: [Vec3; 4] = [Default::default(); 4];
+            //     for (index, point) in vertices.iter().enumerate(){
+            //         let pos = point.position();
+            //         face_points[index] = Vec3::new(pos.x as f32, 250.0, pos.y as f32);
+            //     }
+
+            //     face_points[3] = Vec3::new(face.center().x as f32, 250.0, face.center().y as f32);
+
+            //     faces.push(face_points);
+            // }
+
+            // commands.insert_resource(DebugTriangulation{faces});
+
+
+            let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
+            let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
+
+            let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
+            let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
+
+            let mut dash_nav_quads: DashMap<usize, NavPolygon> = raycasts_rain(
+                &xs,
+                &zs, 
+                &ray_meshes, 
+                &trmd,
+                water_height,
+                // extent
+            );
+
+            let max_key = dash_nav_quads.iter().map(|entry| *entry.key()).max().unwrap();
+            let terrain_vertices_navpolys = trmd.vertices_to_navpolygons(max_key);
+            for np in terrain_vertices_navpolys.iter(){
+                dash_nav_quads.insert(np.index, np.clone());
             }
 
-            let mut polygons: Vec<Polygon> = Vec::new();
-            for ray_mesh in ray_meshes.iter(){
-                if ray_mesh.typ == NavStaticType::Blocker {
-                    let polygon = ray_mesh.shape.to_geo_polygon();
-                    polygons.push(polygon)
-                }
-            }
-            // info!("Initial Polygons count: {}", polygons.len());
+            info!("[NAVMESH][GENERATE] after raycasts_rain: {}", dash_nav_quads.len());
+            merge_by_groups(&mut dash_nav_quads);
 
-            loop {
-                let mut pairs: Vec<(Polygon, Polygon)> = Vec::new();
-                let mut used: Vec<usize> = Vec::new();
+            info!("[NAVMESH][GENERATE] after merge_by_groups: {}", dash_nav_quads.len());
+            let mut quads_count: usize = dash_nav_quads.len();
+            let mut nav_quads: HashMap<usize, NavPolygon> = dash_nav_quads.clone().into_iter().map(|(_tile, quad)| (quad.index, quad)).collect();
 
-                for (index1, poly1) in polygons.iter().enumerate(){
-                    if used.contains(&index1){
-                        continue;
-                    }
-                    for (index2, poly2) in polygons.iter().enumerate(){
+            commands.insert_resource(DebugTriangulation1{data: nav_quads.clone()});
 
-                        if used.contains(&index2){
-                            continue;
-                        }
+            // loop_merge_quads_directional(&mut nav_quads, &mut quads_count, navconfig.iter_count_limit);
+            // info!("[NAVMESH][GENERATE] after loop_merge_quads_directional: {}", nav_quads.len());
 
-                        if index1 == index2 {
-                            continue;
-                        }
+            // find_neighbours(&mut nav_quads);
+            info!("[NAVMESH][GENERATE] after find_neighbours");
 
-                        if poly1.intersects(poly2){
-                            pairs.push((poly1.clone(), poly2.clone()));
-                            used.push(index1);
-                            used.push(index2);
-                        }
-                    }
-                }
-                // info!("Pairs count: {}", pairs.len());
-                if pairs.len() == 0 {
-                    break; // Exit loop if no more intersections
-                }
-                // Merge pairs
-                for (poly1, poly2) in pairs.iter(){
+            navmesh_done = true;
+            // let mut navmesh = NavMesh::from_hash_navpolygons(&mut nav_quads);
+            // navmesh.water_height = navconfig.water_height;
+            // info!("[NAVMESH][GENERATE] NavMesh Polygon count: {} ", navmesh.polygons.len());
+            // info!("[NAVMESH][GENERATE] NavMesh Vertex count: {} ", navmesh.vertices.len());
 
-                    let unioned_multi = poly1.union(poly2);
-                    if unioned_multi.0.len() > 1 {
-                        info!("unioned multi has more than one polygon: {}", unioned_multi.0.len());
-                    }
+            // commands.insert_resource(NavDebug{hit_quad_id: None});
+            // commands.insert_resource(navmesh.clone());
 
-                    let unioned_polygon: Polygon = unioned_multi.0[0].clone();
-                    polygons.retain(|p| (p != poly1) & (p != poly2));
-                    polygons.push(unioned_polygon);
-                }
-                // info!("Polygons count: {}", polygons.len());
-            }
+            // if navconfig.serialize {
+            //     info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", ev.map_name, ev.chunk_id);
+            //     let filename = format!("./assets/navmesh/{}_{}.navmesh.json", ev.map_name, ev.chunk_id);
+            //     IoTaskPool::get().spawn(async move {
+            //         let f = File::create(&filename).ok().unwrap();
+            //         let mut writer = BufWriter::new(f);
+            //         let _res = serde_json::to_writer(&mut writer, &navmesh);
+            //         let _res = writer.flush();
+            //     })
+            //     .detach();
+            // }
 
-
-            for polygon in polygons.iter(){
-                let mut blocker_handles = Vec::new();
-                for coord in polygon.exterior().0.iter(){
-                    let p = Point2::new(coord.x, coord.y);
-                    let handle = cdt.insert(p).unwrap();
-                    blocker_handles.push(handle); 
-                }
-                for i in 0..blocker_handles.len() {
-                    let next = (i + 1) % blocker_handles.len();
-                    cdt.add_constraint(blocker_handles[i], blocker_handles[next]);
-                }
-            }
-
-            let num_faces = cdt.num_all_faces();
-            info!("NUM FACES: {}", num_faces);
-
-            let mut faces: Vec<[Vec3; 3]> = Vec::new();
-            for face in cdt.inner_faces(){
-
-                let vertices = face.vertices();
-                let mut face_points: [Vec3; 3] = [Default::default(); 3];
-                for (index, point) in vertices.iter().enumerate(){
-                    let pos = point.position();
-                    face_points[index] = Vec3::new(pos.x as f32, 250.0, pos.y as f32);
-                }
-                faces.push(face_points);
-            }
-
-            commands.insert_resource(DebugTriangulation{faces});
-
-
-            // cdt.fixed_vertices()
-
-            // NavMesh::{}
-
-            // // 4. Filter out triangles inside blockers
-            //     let valid_triangles: Vec<_> = cdt.inner_faces()
-            //         .filter(|face| {
-            //             let triangle = face.as_triangle();
-            //             let centroid = calculate_centroid_2d(&triangle);
-                        
-            //             // Keep if centroid is NOT inside any blocker
-            //             !self.blockers.iter().any(|b| point_inside_shape(centroid, b))
-            //         })
-            //         .collect();
-                
-            //     // 5. Project back to 3D using heightmap
-            //     valid_triangles.iter()
-            //         .map(|face| to_3d_triangle(face, &self.heightmap))
-            //         .collect()
-
-
-
-
-
-        //     let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
-        //     let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
-
-        //     let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-        //     let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-
-        //     let mut dash_nav_quads: DashMap<usize, NavQuad> = raycasts_rain(
-        //         &xs,
-        //         &zs, 
-        //         &ray_meshes, 
-        //         &trmd,
-        //         water_height,
-        //         extent
-        //     );
-
-        //     info!("[NAVMESH][GENERATE] after raycasts_rain: {}", dash_nav_quads.len());
-        //     merge_by_groups(&mut dash_nav_quads);
-
-        //     info!("[NAVMESH][GENERATE] after merge_by_groups: {}", dash_nav_quads.len());
-        //     let mut quads_count: usize = dash_nav_quads.len();
-        //     let mut nav_quads: HashMap<usize, NavQuad> = dash_nav_quads.clone().into_iter().map(|(_tile, quad)| (quad.index, quad)).collect();
-
-        //     loop_merge_quads_directional(&mut nav_quads, &mut quads_count, navconfig.iter_count_limit);
-        //     info!("[NAVMESH][GENERATE] after loop_merge_quads_directional: {}", nav_quads.len());
-
-        //     find_neighbours(&mut nav_quads);
-        //     info!("[NAVMESH][GENERATE] after find_neighbours");
-
-        //     navmesh_done = true;
-        //     let mut navmesh = NavMesh::from_hash_navquads(&mut nav_quads);
-        //     navmesh.water_height = navconfig.water_height;
-        //     info!("[NAVMESH][GENERATE] NavMesh Polygon count: {} ", navmesh.polygons.len());
-        //     info!("[NAVMESH][GENERATE] NavMesh Vertex count: {} ", navmesh.vertices.len());
-
-        //     commands.insert_resource(NavDebug{hit_quad_id: None});
-        //     commands.insert_resource(navmesh.clone());
-
-        //     if navconfig.serialize {
-        //         info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", ev.map_name, ev.chunk_id);
-        //         let filename = format!("./assets/navmesh/{}_{}.navmesh.json", ev.map_name, ev.chunk_id);
-        //         IoTaskPool::get().spawn(async move {
-        //             let f = File::create(&filename).ok().unwrap();
-        //             let mut writer = BufWriter::new(f);
-        //             let _res = serde_json::to_writer(&mut writer, &navmesh);
-        //             let _res = writer.flush();
-        //         })
-        //         .detach();
-        //     }
-
-        // }
-
-        // if !navmesh_done {
-        //     // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
-        //     commands.write_message(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
-        // }
         }
+
+        if !navmesh_done {
+            // info!("[NAVMESH][GENERATE] NavMesh was not created, sending event again for {} {}", ev.map_name, ev.chunk_id);
+            commands.write_message(GenerateNavMesh::new(ev.name.clone(), &ev.map_name, &ev.chunk_id, ev.chunk_size));
+        }
+        // }
     }
 }
 

@@ -8,6 +8,7 @@ use ordered_float::*;
 use serde::{Serialize,Deserialize};
 
 use crate::pathfinding::{PathFinder, Path, SearchStep};
+use crate::triangles::NavPolygon;
 use crate::types::{NavQuad, NavType, Neighbours, QuadAABB};
 
 pub(crate) const ORIGIN_HEIGHT: f32 = 1000.0;
@@ -110,6 +111,18 @@ impl NavMesh {
             let polygon = Polygon::from_navquad(quad);
             polygons.insert(polygon.index, polygon);
         }
+        navmesh.polygons = polygons;
+        navmesh.process_vertices();
+        return navmesh;
+    }
+
+    pub(crate) fn from_hash_navpolygons(navquads: &mut HashMap<usize, NavPolygon>) -> Self {
+        let mut navmesh = NavMesh::default();
+        let mut polygons: HashMap<usize, Polygon> = HashMap::with_capacity(3000);
+        // for (_quad_id, quad) in navquads.iter_mut(){
+        //     let polygon = Polygon::from_navpolygon(quad);
+        //     polygons.insert(polygon.index, polygon);
+        // }
         navmesh.polygons = polygons;
         navmesh.process_vertices();
         return navmesh;
@@ -393,6 +406,24 @@ pub struct Polygon {
     pub(crate) neighbours: Neighbours
 }
 impl Polygon {
+    // fn from_navpolygon(q: &mut NavPolygon) -> Self {
+    //     let mut poly = Polygon {
+    //         index: q.index,
+    //         vertices: vec![
+    //             Vertex::from_vec3a(q.aabb.min_x_min_z),
+    //             Vertex::from_vec3a(q.aabb.min_x_max_z),
+    //             Vertex::from_vec3a(q.aabb.max_x_min_z),
+    //             Vertex::from_vec3a(q.aabb.max_x_max_z)
+    //         ],            
+    //         aabb: q.aabb,
+    //         typ: q.typ,
+    //         neighbours: q.neighbours.clone()
+    //     };
+    //     poly.sort_vertices();
+    //     return poly;
+    // }
+
+
     fn from_navquad(q: &mut NavQuad) -> Self {
         let mut poly = Polygon {
             index: q.index,

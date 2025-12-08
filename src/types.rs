@@ -195,7 +195,7 @@ impl RayTargetMeshShape{
                 //         center + rotated
                 //     })
                 //     .collect();
-                info!("points: {:?}", corners);
+                // info!("points: {:?}", corners);
                 return corners;
             }
         }

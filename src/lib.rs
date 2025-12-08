@@ -6,6 +6,7 @@ mod plugin;
 mod terrain;
 mod tools;
 mod types;
+mod triangles;
 
 
 pub mod prelude {
