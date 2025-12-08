@@ -10,7 +10,7 @@ use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone)]
 pub(crate) struct TerrainRayMeshData {
-    mesh_transform:            Mat4,
+    pub mesh_transform:            Mat4,
     triangle_vertex_positions: Vec<[Vec3A; 3]>,
     triangle_normals:          Vec<Vec3A>,
     triangle_count:            usize,

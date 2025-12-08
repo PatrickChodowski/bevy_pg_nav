@@ -183,20 +183,20 @@ impl RayTargetMeshShape{
                     center + Vec2::new(-half.x, half.y),  // Top-left
                 ];
 
-                let cos = z_angle.cos();
-                let sin = z_angle.sin();
+                // let cos = z_angle.cos();
+                // let sin = z_angle.sin();
                 
-                let points = corners.iter()
-                    .map(|corner| {
-                        let rotated = Vec2::new(
-                            corner.x * cos - corner.y * sin,
-                            corner.x * sin + corner.y * cos,
-                        );
-                        center + rotated
-                    })
-                    .collect();
-
-                return points;
+                // let points = corners.iter()
+                //     .map(|corner| {
+                //         let rotated = Vec2::new(
+                //             corner.x * cos - corner.y * sin,
+                //             corner.x * sin + corner.y * cos,
+                //         );
+                //         center + rotated
+                //     })
+                //     .collect();
+                info!("points: {:?}", corners);
+                return corners;
             }
         }
 

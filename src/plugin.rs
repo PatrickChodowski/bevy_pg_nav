@@ -39,7 +39,9 @@ impl Plugin for PGNavPlugin {
         .insert_resource(NavMesh::default())
         .insert_resource(NavDebug::default())
         .add_systems(PreUpdate, generate_navmesh.run_if(on_message::<GenerateNavMesh>))
-        .add_systems(Update, debug)
+        // .add_systems(Update, debug)
+
+        .add_systems(Update, debug_triangulation.run_if(resource_exists::<DebugTriangulation>))
         ;
     }
 }
@@ -70,6 +72,29 @@ impl GenerateNavMesh {
 
 use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
 use ordered_float::OrderedFloat;
+
+#[derive(Resource)]
+pub struct DebugTriangulation {
+    pub faces: Vec<[Vec3;3]>
+}
+use bevy::color::palettes::css::WHITE;
+fn debug_triangulation(
+    data: Res<DebugTriangulation>,
+    mut gizmos: Gizmos,
+){
+    let clr: Color= Color::from(WHITE);
+
+    for face in data.faces.iter(){
+        let a = face[0];
+        let b = face[1];
+        let c = face[2];
+
+        gizmos.line(a, b, clr);
+        gizmos.line(b, c, clr);
+        gizmos.line(c, a, clr);
+
+    }
+}
 
 fn generate_navmesh(
     mut events:     MessageReader<GenerateNavMesh>,
@@ -119,19 +144,13 @@ fn generate_navmesh(
             // SPADE APPROACH 
 
             let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
-            let mut vertex_map: HashMap<usize, FixedVertexHandle> = HashMap::new();
 
             for (index, vertex) in trmd.vertices.iter().enumerate(){
-                let point = Point2::new(vertex.x as f64, vertex.z as f64);
+                let tvex = trmd.mesh_transform.transform_point3a(*vertex);
+                let point = Point2::new(tvex.x as f64*-1.0, tvex.z as f64*-1.0);
                 let handle = cdt.insert(point).unwrap();
-                // let key = (OrderedFloat(vertex.x), OrderedFloat(vertex.z));
-                vertex_map.insert(index, handle);
             }
-            // for edge in trmd.edges.iter() {
-            //     let v1 = vertex_map[&edge.0];
-            //     let v2 = vertex_map[&edge.1];
-            //     cdt.add_constraint(v1, v2);
-            // }
+
             let mut polygons: Vec<Polygon> = Vec::new();
             for ray_mesh in ray_meshes.iter(){
                 if ray_mesh.typ == NavStaticType::Blocker {
@@ -139,7 +158,7 @@ fn generate_navmesh(
                     polygons.push(polygon)
                 }
             }
-            info!("Initial Polygons count: {}", polygons.len());
+            // info!("Initial Polygons count: {}", polygons.len());
 
             loop {
                 let mut pairs: Vec<(Polygon, Polygon)> = Vec::new();
@@ -166,17 +185,23 @@ fn generate_navmesh(
                         }
                     }
                 }
-                info!("Pairs count: {}", pairs.len());
+                // info!("Pairs count: {}", pairs.len());
                 if pairs.len() == 0 {
                     break; // Exit loop if no more intersections
                 }
                 // Merge pairs
                 for (poly1, poly2) in pairs.iter(){
-                    let unioned_polygon: Polygon = poly1.union(poly2).0[0].clone();
+
+                    let unioned_multi = poly1.union(poly2);
+                    if unioned_multi.0.len() > 1 {
+                        info!("unioned multi has more than one polygon: {}", unioned_multi.0.len());
+                    }
+
+                    let unioned_polygon: Polygon = unioned_multi.0[0].clone();
                     polygons.retain(|p| (p != poly1) & (p != poly2));
                     polygons.push(unioned_polygon);
                 }
-                info!("Polygons count: {}", polygons.len());
+                // info!("Polygons count: {}", polygons.len());
             }
 
 
@@ -195,6 +220,25 @@ fn generate_navmesh(
 
             let num_faces = cdt.num_all_faces();
             info!("NUM FACES: {}", num_faces);
+
+            let mut faces: Vec<[Vec3; 3]> = Vec::new();
+            for face in cdt.inner_faces(){
+
+                let vertices = face.vertices();
+                let mut face_points: [Vec3; 3] = [Default::default(); 3];
+                for (index, point) in vertices.iter().enumerate(){
+                    let pos = point.position();
+                    face_points[index] = Vec3::new(pos.x as f32, 250.0, pos.y as f32);
+                }
+                faces.push(face_points);
+            }
+
+            commands.insert_resource(DebugTriangulation{faces});
+
+
+            // cdt.fixed_vertices()
+
+            // NavMesh::{}
 
             // // 4. Filter out triangles inside blockers
             //     let valid_triangles: Vec<_> = cdt.inner_faces()
