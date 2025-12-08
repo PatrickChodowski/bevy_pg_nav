@@ -121,9 +121,6 @@ fn generate_navmesh(
             let mut cdt = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
             let mut vertex_map: HashMap<usize, FixedVertexHandle> = HashMap::new();
 
-
-            // let cdt = ConstrainedDelaunayTriangulation::<Point2<f32>>::bulk_load_cdt(vertices, edges, on_conflict_found);
-
             for (index, vertex) in trmd.vertices.iter().enumerate(){
                 let point = Point2::new(vertex.x as f64, vertex.z as f64);
                 let handle = cdt.insert(point).unwrap();
@@ -182,28 +179,22 @@ fn generate_navmesh(
                 info!("Polygons count: {}", polygons.len());
             }
 
-                //     let polygon = ray_mesh.shape.to_polygon();
-                //     let mut blocker_handles = Vec::new();
-                        
-                //     for point in polygon.iter() {
-                //         let p = Point2::new(point.x as f64, point.y as f64);
-                //         let handle = cdt.insert(p).unwrap();
-                //         blocker_handles.push(handle);
-                //     }
-                    
-                //     for i in 0..blocker_handles.len() {
-                //         let next = (i + 1) % blocker_handles.len();
-                //         cdt.try_add_constraint(blocker_handles[i], blocker_handles[next]);
-                //     }
-                // }
 
-            // // let valid_triangles = cdt.inner_faces()
-            // //                          .map(|face| face.as_triangle());
+            for polygon in polygons.iter(){
+                let mut blocker_handles = Vec::new();
+                for coord in polygon.exterior().0.iter(){
+                    let p = Point2::new(coord.x, coord.y);
+                    let handle = cdt.insert(p).unwrap();
+                    blocker_handles.push(handle); 
+                }
+                for i in 0..blocker_handles.len() {
+                    let next = (i + 1) % blocker_handles.len();
+                    cdt.add_constraint(blocker_handles[i], blocker_handles[next]);
+                }
+            }
 
-
-            // let num_faces = cdt.num_all_faces();
-
-            // info!("NUM FACES: {}", num_faces);
+            let num_faces = cdt.num_all_faces();
+            info!("NUM FACES: {}", num_faces);
 
             // // 4. Filter out triangles inside blockers
             //     let valid_triangles: Vec<_> = cdt.inner_faces()
