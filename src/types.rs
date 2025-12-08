@@ -4,6 +4,9 @@ use bevy::platform::collections::{HashSet, HashMap};
 use bevy::color::palettes::tailwind::{BLUE_500, GREEN_500, YELLOW_500, RED_500};
 use serde::{Serialize, Deserialize};
 use std::cmp::Ordering;
+use geo::{Polygon, LineString, Coord, MultiPolygon};
+
+use std::f32::consts::PI;
 
 use crate::tools::NavRay;
 use crate::tools::AABB;
@@ -145,6 +148,58 @@ impl RayTargetMeshShape{
                 return (shape, ray_hit_height, vertex_height);
             }
         }
+    }
+
+    pub (crate) fn to_geo_polygon(&self) -> geo::Polygon {
+        let poly = self.to_polygon();
+        let coords: Vec<Coord<f64>> = poly.iter().map(|p| Coord { x: p.x as f64, y: p.y as f64 }).collect();
+        return Polygon::new(LineString::from(coords), vec![]);
+    }
+
+    pub (crate) fn to_polygon(&self) -> Vec<Vec2>{
+
+        match self {
+            RayTargetMeshShape::Circle((origin, radius)) => {
+                let segments: usize = 6;
+                let points: Vec<Vec2> = (0..segments)
+                    .map(|i| {
+                        let angle = (i as f32 / segments as f32) * 2.0 * PI;
+                        let x = angle.cos() * radius;
+                        let z = angle.sin() * radius;
+                        origin.xz() + Vec2::new(x, z)
+                    })
+                    .collect();
+                return points;
+            }
+            RayTargetMeshShape::Rect((origin, _normal, dims, z_angle)) => {
+
+                let center = origin.xz();
+                let half = dims * 0.5;
+                
+                let corners = vec![
+                    center + Vec2::new(-half.x, -half.y), // Bottom-left
+                    center + Vec2::new(half.x, -half.y),  // Bottom-right
+                    center + Vec2::new(half.x, half.y),   // Top-right
+                    center + Vec2::new(-half.x, half.y),  // Top-left
+                ];
+
+                let cos = z_angle.cos();
+                let sin = z_angle.sin();
+                
+                let points = corners.iter()
+                    .map(|corner| {
+                        let rotated = Vec2::new(
+                            corner.x * cos - corner.y * sin,
+                            corner.x * sin + corner.y * cos,
+                        );
+                        center + rotated
+                    })
+                    .collect();
+
+                return points;
+            }
+        }
+
     }
 }
 

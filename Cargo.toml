@@ -26,3 +26,6 @@ ordered-float = "4.5.0"
 num-traits = "0.2.19"
 rayon = "1.10.0"
 dashmap = {version="6.1.0", features = ["rayon"] }
+spade = "2.15.0"
+geo = "0.32.0"
+geo-booleanop = "0.3.2"

@@ -3,22 +3,24 @@ use std::f32::EPSILON;
 use bevy::prelude::*;
 use bevy::mesh::{Indices, Mesh, VertexAttributeValues};
 use bevy::render::render_resource::PrimitiveTopology;
-use bevy::platform::collections::HashMap;
+use bevy::platform::collections::{HashMap, HashSet};
 
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone)]
 pub(crate) struct TerrainRayMeshData {
-    mesh_transform:   Mat4,
-    vertex_positions: Vec<[Vec3A; 3]>,
-    vertex_normals:   Vec<Vec3A>,
-    triangle_count:   usize,
-    quads_mapping:    HashMap<usize, usize> // Pairs of triangles that are making a quad
+    mesh_transform:            Mat4,
+    triangle_vertex_positions: Vec<[Vec3A; 3]>,
+    triangle_normals:          Vec<Vec3A>,
+    triangle_count:            usize,
+    pub vertices:              Vec<Vec3A>,
+    pub edges:                 HashSet<(usize, usize)>,
+    quads_mapping:             HashMap<usize, usize> // Pairs of triangles that are making a quad
 }
 impl TerrainRayMeshData {
     pub(crate)  fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
-        if let Some(vpos) = self.vertex_positions.get(triangle_id){
+        if let Some(vpos) = self.triangle_vertex_positions.get(triangle_id){
             let mt = self.mesh_transform.inverse();
             return Some([
                 mt.transform_point3a(vpos[0]),
@@ -37,10 +39,7 @@ impl TerrainRayMeshData {
             let mut group_id = intersection_data.triangle_index;
             if let Some(mapping) = self.quads_mapping.get(&group_id){
                 group_id = *mapping;
-            } else {
-                info!("not mapped: {}", group_id);
-            }
-
+            } 
             return Some((height, group_id, intersection_data.normal));
         } else {
             return None;
@@ -71,10 +70,18 @@ impl TerrainRayMeshData {
         let mut tri_pos: Vec<[Vec3A; 3]> = Vec::new();
         let mut tri_norm: Vec<Vec3A> = Vec::new();
 
+
+        let mut edges: HashSet<(usize, usize)> = HashSet::new();
+
         if let Some(indices) = &mesh.indices() {
             match indices {
                 Indices::U16(vertex_indices) => {
                     for index in vertex_indices.chunks(3) {
+
+                        edges.insert((index[0].into(), index[1].into()));
+                        edges.insert((index[1].into(), index[2].into()));
+                        edges.insert((index[2].into(), index[0].into()));
+
                         let tri_vertex_positions = [
                             Vec3A::from(vertex_positions[index[0] as usize]),
                             Vec3A::from(vertex_positions[index[1] as usize]),
@@ -90,7 +97,12 @@ impl TerrainRayMeshData {
                     }
                 }
                 Indices::U32(vertex_indices) => {
+
                     for index in vertex_indices.chunks(3) {
+                        edges.insert((index[0] as usize, index[1] as usize));
+                        edges.insert((index[1] as usize, index[2] as usize));
+                        edges.insert((index[2] as usize, index[0] as usize));
+
                         let tri_vertex_positions = [
                             Vec3A::from(vertex_positions[index[0] as usize]),
                             Vec3A::from(vertex_positions[index[1] as usize]),
@@ -109,31 +121,40 @@ impl TerrainRayMeshData {
         } else {
             panic!("No indices in terrain");
         }
+
+
+        let vertices: Vec<Vec3A> = vertex_positions.iter().map(|v| Vec3A::new(v[0], v[1], v[2])).collect::<Vec<Vec3A>>();
+
         let triangle_count = tri_pos.len();
         let mut trmd =  TerrainRayMeshData{
             mesh_transform: mesh_transform.inverse(),
-            vertex_positions: tri_pos,
-            vertex_normals: tri_norm,
+            triangle_vertex_positions: tri_pos,
+            triangle_normals: tri_norm,
             triangle_count,
+            vertices,
+            edges,
             quads_mapping: HashMap::new()
         };
 
         trmd.map_quads();
 
-        for a_tri in 0..trmd.triangle_count {
-            let positions = trmd.vertex_positions[a_tri];
-            for pos in positions.iter(){
-                if pos.y >= 210.0 {
-                    info!("Above 210: {} normal: {} mapping: {:?} positions: {:?}", a_tri, trmd.normal(a_tri), trmd.quads_mapping.get(&a_tri), positions);
-                    break;
-                }
-            }
-        }
+        // for a_tri in 0..trmd.triangle_count {
+        //     let positions = trmd.vertex_positions[a_tri];
+        //     for pos in positions.iter(){
+        //         if pos.y >= 210.0 {
+        //             info!("Above 210: {} normal: {} mapping: {:?} positions: {:?}", a_tri, trmd.normal(a_tri), trmd.quads_mapping.get(&a_tri), positions);
+        //             break;
+        //         }
+        //     }
+        // }
 
         // Looks like its only an issue for edges of the mesh?
         // for a_tri in 0..trmd.triangle_count {
         //     if !trmd.quads_mapping.contains_key(&a_tri) {
-        //         info!("Triangle not in mapping: {}, norma: {:?}, pos: {:?}, is_right: {}", a_tri, trmd.normal(a_tri), trmd.positions(a_tri), trmd.is_right(a_tri));
+        //         // info!("Triangle not in mapping: {}, norma: {:?}, pos: {:?}, is_right: {}", a_tri, trmd.normal(a_tri), trmd.positions(a_tri), trmd.is_right(a_tri));
+        //         // hmmm
+        //         trmd.quads_mapping.insert(a_tri, a_tri);
+
         //     }
         // }
 
@@ -173,7 +194,7 @@ impl TerrainRayMeshData {
                 }
                 let b_points: [Vec3A; 2] = self.get_longest_side_points(b_tri);
 
-                if self.normal(a_tri) != self.normal(b_tri) {
+                if self.triangle_normal(a_tri) != self.triangle_normal(b_tri) {
                     continue;
                 }
 
@@ -190,13 +211,13 @@ impl TerrainRayMeshData {
         self.quads_mapping = quads_mapping;
     }
 
-    fn normal(&self, triangle_id: usize) -> Vec3A {
-        return self.vertex_normals[triangle_id];
+    fn triangle_normal(&self, triangle_id: usize) -> Vec3A {
+        return self.triangle_normals[triangle_id]
     }
 
 
-    fn positions(&self, triangle_id: usize) -> [Vec3A;3] {
-        return self.vertex_positions[triangle_id];
+    fn triangle_positions(&self, triangle_id: usize) -> [Vec3A;3] {
+        return self.triangle_vertex_positions[triangle_id]
     }
 
     fn get_longest_side_points(&self, triangle_id: usize) -> [Vec3A; 2] {
@@ -259,19 +280,19 @@ impl TerrainRayMeshData {
 
         for t in 0..self.triangle_count{
 
-            let tri_vertices = self.vertex_positions[t];
-            let tri_normals = self.vertex_normals[t];
+            let tri_vertices = self.triangle_positions(t);
+            let tri_normal = self.triangle_normal(t);
 
             if let Some(ray_hit) = ray_triangle_intersection(&mesh_space_ray, &tri_vertices) {
                 let distance = *ray_hit.distance();
                 // info!("distance: {}", distance);
                 if distance > 0.0 {
-                    let u = ray_hit.uv_coords().0;
-                    let v = ray_hit.uv_coords().1;
-                    let w = 1.0 - u - v;
-                    let normal: Vec3 = (tri_normals * u + tri_normals * v + tri_normals * w).into();
+                    // let u = ray_hit.uv_coords().0;
+                    // let v = ray_hit.uv_coords().1;
+                    // let w = 1.0 - u - v;
+                    // let normal: Vec3 = (tri_normals * u + tri_normals * v + tri_normals * w).into();
                     let intersection = IntersectionData::new(
-                        self.mesh_transform.transform_vector3(normal),
+                        self.mesh_transform.transform_vector3(tri_normal.into()),
                         self.mesh_transform
                             .transform_vector3(mesh_space_ray.direction() * distance)
                             .length(),
