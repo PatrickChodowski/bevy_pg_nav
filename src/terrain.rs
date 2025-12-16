@@ -6,13 +6,13 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::platform::collections::{HashMap, HashSet};
 
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
-use crate::triangles::NavPolygon;
-use crate::types::NavType;
-use crate::types::Neighbours;
+// use crate::triangles::NavPolygon;
+// use crate::types::NavType;
+// use crate::types::Neighbours;
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone)]
-pub(crate) struct TerrainRayMeshData {
+pub struct TerrainRayMeshData {
     pub mesh_transform:            Mat4,
     triangle_vertex_positions: Vec<[Vec3A; 3]>,
     triangle_normals:          Vec<Vec3A>,
@@ -34,7 +34,7 @@ impl TerrainRayMeshData {
         return None;
     }
 
-    pub(crate) fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
+    pub fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
         if let Some(intersection_data) = self.ray_intersection(ray){
             let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
@@ -44,7 +44,7 @@ impl TerrainRayMeshData {
         }
     }
 
-    pub(crate) fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
+    pub fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
         if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
             panic!("Wrong Topology for Terrain {:?}", mesh.primitive_topology());
         };
@@ -166,33 +166,33 @@ impl TerrainRayMeshData {
 
     }
 
-    pub fn vertices_to_navpolygons(&self, start_index: usize) -> Vec<NavPolygon> {
-        let mut polys: Vec<NavPolygon> = Vec::with_capacity(self.vertices.len());
-        let mut index = start_index;
-        let invert = Vec3A::new(-1.0, 1.0, -1.0);
-        for t in 0..self.triangle_count{
-            index += 1;
-            let tri_vertices = self.triangle_positions(t);
-            let tri_normal = self.triangle_normal(t);
+    // pub fn vertices_to_navpolygons(&self, start_index: usize) -> Vec<NavPolygon> {
+    //     let mut polys: Vec<NavPolygon> = Vec::with_capacity(self.vertices.len());
+    //     let mut index = start_index;
+    //     let invert = Vec3A::new(-1.0, 1.0, -1.0);
+    //     for t in 0..self.triangle_count{
+    //         index += 1;
+    //         let tri_vertices = self.triangle_positions(t);
+    //         let tri_normal = self.triangle_normal(t);
 
-            for vertex in tri_vertices.iter(){
-                let t_vertex = vec![self.mesh_transform.transform_point3a(*vertex)*invert];
-                // info!("{:?}", t_vertex);
+    //         for vertex in tri_vertices.iter(){
+    //             let t_vertex = vec![self.mesh_transform.transform_point3a(*vertex)*invert];
+    //             // info!("{:?}", t_vertex);
 
-                let np = NavPolygon{
-                    group_id: t,
-                    loc: *vertex,
-                    index,
-                    vertices: t_vertex,
-                    normal: tri_normal,
-                    typ: NavType::Terrain,
-                    neighbours: Neighbours::default()
-                };
-                polys.push(np);
-            }
-        }
-        return polys;
-    }
+    //             let np = NavPolygon{
+    //                 group_id: t,
+    //                 loc: *vertex,
+    //                 index,
+    //                 vertices: t_vertex,
+    //                 normal: tri_normal,
+    //                 typ: NavType::Terrain,
+    //                 neighbours: Neighbours::default()
+    //             };
+    //             polys.push(np);
+    //         }
+    //     }
+    //     return polys;
+    // }
 
 
     fn map_quads(&mut self){
@@ -305,10 +305,10 @@ impl TerrainRayMeshData {
             self.mesh_transform.transform_vector3(ray.direction()),
         );
 
-        for t in 0..self.triangle_count{
+        for triangle_index in 0..self.triangle_count{
 
-            let tri_vertices = self.triangle_positions(t);
-            let tri_normal = self.triangle_normal(t);
+            let tri_vertices = self.triangle_positions(triangle_index);
+            let tri_normal = self.triangle_normal(triangle_index);
 
             if let Some(ray_hit) = ray_triangle_intersection(&mesh_space_ray, &tri_vertices) {
                 let distance = *ray_hit.distance();
@@ -323,7 +323,7 @@ impl TerrainRayMeshData {
                         self.mesh_transform
                             .transform_vector3(mesh_space_ray.direction() * distance)
                             .length(),
-                        t
+                        triangle_index
                     );
                     return Some(intersection);
                 }

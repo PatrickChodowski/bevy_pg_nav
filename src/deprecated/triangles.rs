@@ -142,10 +142,10 @@ impl PolygonsGroupToMerge {
         let multi_point: geo::MultiPoint<f32> = points.into();
         let convex_hull = multi_point.convex_hull();
         let center = convex_hull.centroid().unwrap();
-        let vertices = convex_hull.exterior_coords_iter().map(|x| Vec3A::new(x.x, 200.0, x.y)).collect::<Vec<Vec3A>>();
+        let vertices = convex_hull.exterior_coords_iter().map(|x| Vec3A::new(x.x, 250.0, x.y)).collect::<Vec<Vec3A>>();
         let nq = NavPolygon {
             group_id: self.group_id,
-            loc: Vec3A::new(center.x(), 200.0, center.y()),
+            loc: Vec3A::new(center.x(), 250.0, center.y()),
             index: *new_index,
             normal: self.normals[0],
             typ: *self.types.iter().next().unwrap(),

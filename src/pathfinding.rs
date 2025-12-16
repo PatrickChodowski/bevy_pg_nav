@@ -10,8 +10,8 @@ use std::{
 };
 use std::fmt;
 use std::collections::BinaryHeap;
-use crate::navmesh::{NavMesh, Polygon, Vertex};
-use crate::types::NavType;
+use crate::types::{PGNavmesh, PGPolygon, PGVertex};
+
 
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
@@ -98,8 +98,7 @@ pub struct PathFinder<'m> {
     pub to: Vec2,
     // pub polygon_from: usize,
     pub polygon_to: usize,
-    pub navmesh: &'m NavMesh,
-    blockers: Vec<NavType>
+    pub navmesh: &'m PGNavmesh
 }
 
 
@@ -113,22 +112,10 @@ impl<'m> PathFinder<'m> {
     }
 
     pub fn setup(
-        navmesh: &'m NavMesh,
+        navmesh: &'m PGNavmesh,
         from: (Vec2, usize),    
-        to:   (Vec2, usize),
-        blockers: Option<Vec<NavType>>
+        to:   (Vec2, usize)
     ) -> Self {
-
-        // If no blockers are provided, apply NavType::Blocker by default
-        let path_blockers: Vec<NavType>;
-        if let Some(blockers) = blockers {
-            path_blockers = blockers;
-        } else {
-            path_blockers = vec![
-                NavType::Blocker
-            ]
-        }
-
         let mut path_finder = PathFinder{
             queue: BinaryHeap::with_capacity(15),
             node_buffer: Vec::with_capacity(10),
@@ -137,34 +124,31 @@ impl<'m> PathFinder<'m> {
             to: to.0,
             // polygon_from: from.1,
             polygon_to: to.1,
-            navmesh,
-            blockers: path_blockers.clone()
+            navmesh
         };
 
         let empty_node = Node::empty(from);
-        let starting_polygon: &&Polygon = &navmesh.polygon(&from.1).unwrap();
+        let starting_polygon: &&PGPolygon = &navmesh.polygon(&from.1).unwrap();
 
         for edge in starting_polygon.edges_index() {
 
-            let start: &Vertex = if let Some(v) = navmesh.vertex(&edge[0]) {
+            let start: &PGVertex = if let Some(v) = navmesh.vertex(&edge[0]) {
                 v
             } else {
                 continue;
             };
-            let end: &Vertex = if let Some(v) = navmesh.vertex(&edge[1]) {
+            let end: &PGVertex = if let Some(v) = navmesh.vertex(&edge[1]) {
                 v
             } else {
                 continue;
             };
 
-            let other_sides = start.common(&end, &from.1, &path_blockers);
-
-
+            let other_sides = start.common(&end, &from.1);
             for other_side in other_sides.iter(){
 
                 path_finder.try_add_node(
                     from.0,
-                    **other_side,
+                    *other_side,
                     (start.xz(), edge[0]),
                     (end.xz(), edge[1]),
                     &empty_node,
@@ -285,11 +269,11 @@ impl<'m> PathFinder<'m> {
         loop {
             for successor in self.edges_between(&node).iter() {
                 let [successor_edge_0, successor_edge_1] = successor.edge;
-                let start: &Vertex = self.navmesh.vertex(&successor_edge_0).unwrap();
-                let end: &Vertex = self.navmesh.vertex(&successor_edge_1).unwrap();
+                let start: &PGVertex = self.navmesh.vertex(&successor_edge_0).unwrap();
+                let end: &PGVertex = self.navmesh.vertex(&successor_edge_1).unwrap();
                 let start_loc: Vec2 = start.xz();
                 let end_loc: Vec2 = end.xz();
-                let other_sides = start.common(&end, &node.polygon_to, &self.blockers);
+                let other_sides = start.common(&end, &node.polygon_to);
 
                 if other_sides.len() == 0 {
                     // println!("No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
@@ -304,12 +288,12 @@ impl<'m> PathFinder<'m> {
                 for other_side in other_sides.iter(){
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
-                    if &self.polygon_to != *other_side && self.navmesh.polygons[*other_side].neighbours.len() == 1{
+                    if self.polygon_to != *other_side && self.navmesh.polygons[other_side].neighbours.len() == 1{
                         // println!("Dead End: Prune edges leading to only one polygon that is not target");
                         continue;
                     }
 
-                    if &node.polygon_from == *other_side {
+                    if node.polygon_from == *other_side {
                         // println!("If other side is polygon from: not going back");
                         continue;
                     }
@@ -321,8 +305,8 @@ impl<'m> PathFinder<'m> {
                             if successor.interval.0.distance_squared(start_loc) > EPSILON {
                                 continue;
                             }
-                            let vertex: &Vertex = self.navmesh.vertices.get(&node.edge.0).unwrap();
-                            let is_corner = vertex.is_corner(&self.blockers);
+                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.0).unwrap();
+                            let is_corner = vertex.is_corner();
                             let dist = vertex.xz().distance_squared(node.interval.0);
 
                             // let interval_dist = node.interval.0.distance_squared(node.interval.1);
@@ -338,10 +322,9 @@ impl<'m> PathFinder<'m> {
                             if (successor.interval.1).distance_squared(end_loc) > EPSILON {
                                 continue;
                             }
-                            let vertex: &Vertex = self.navmesh.vertices.get(&node.edge.1).unwrap();
+                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.1).unwrap();
                             let dist = vertex.xz().distance_squared(node.interval.1);
-                            let is_corner = vertex.is_corner(&self.blockers);
-
+                            let is_corner = vertex.is_corner();
                             if is_corner && dist < EPSILON{
                                 node.interval.1
                             } else {
@@ -356,7 +339,7 @@ impl<'m> PathFinder<'m> {
 
                     self.try_add_node(
                         root,
-                        **other_side,
+                        *other_side,
                         (successor.interval.0, successor_edge_0), //start
                         (successor.interval.1, successor_edge_1), // end
                         &node,

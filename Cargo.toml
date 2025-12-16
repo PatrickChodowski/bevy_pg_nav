@@ -24,8 +24,12 @@ itertools = "0.13.0"
 smallvec = { version = "1.15", features = ["union", "const_generics","serde"] }
 ordered-float = "4.5.0"
 num-traits = "0.2.19"
-rayon = "1.10.0"
+bevy_pg_core = {git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
+
+rerecast = {path="../rerecast/crates/rerecast"}
+avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
+bevy_rerecast = {path="../rerecast/crates/bevy_rerecast"}
 dashmap = {version="6.1.0", features = ["rayon"] }
+rayon = "1.11.0"
 spade = "2.15.0"
-geo = "0.32.0"
-geo-booleanop = "0.3.2"
+earcutr = "0.5.0"
