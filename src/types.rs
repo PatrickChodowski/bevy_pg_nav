@@ -1,4 +1,3 @@
-use bevy::color::palettes::css::{BLACK, WHITE};
 use std::ops::RangeInclusive;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
@@ -15,14 +14,30 @@ pub struct PGVertex {
 }
 impl PGVertex {
     pub fn is_corner(&self) -> bool {
-        return true;
+        if self.polygons.len() == 1 {
+            return true;
+        } else {
+            return false;
+        }
     }
-    pub fn xz(&self) -> Vec2 {
-        return Vec2::new(0.0, 0.0);
-    }
-    pub fn common(&self, other: &PGVertex, polygon: &usize) -> Vec<usize> {
 
-        return Vec::new()
+    pub fn xz(&self) -> Vec2 {
+        return self.loc.xz();
+    }
+
+    fn joins(&self, index: usize) -> bool {
+        return self.polygons.contains(&index);
+    }
+
+    pub fn common(
+        &self, 
+        other: &PGVertex,
+        except: &usize
+    ) -> Vec<&usize> {
+
+        return self.polygons.iter()
+            .filter(|p_index| other.joins(**p_index) && p_index != &except)
+            .collect::<Vec<&usize>>();
     }
 }
 
@@ -36,23 +51,117 @@ pub struct PGPolygon {
 }
 
 impl PGPolygon {
-    pub fn has_point(&self, loc: &Vec2) -> bool {
+    pub fn has_point(
+        &self, 
+        loc: &Vec2
+    ) -> bool {
+        const EPSILON: f32 = 0.0000001;
 
-        return true;
+        let a = self.vertices[0].xz();
+        let b = self.vertices[1].xz();
+        let c = self.vertices[2].xz();
+
+        // Calculate barycentric coordinates
+        let v0x = c.x - a.x;
+        let v0y = c.y - a.y;
+        let v1x = b.x - a.x;
+        let v1y = b.y - a.y;
+        let v2x = loc.x - a.x;
+        let v2y = loc.y - a.y;
+        
+        let dot00 = v0x * v0x + v0y * v0y;
+        let dot01 = v0x * v1x + v0y * v1y;
+        let dot02 = v0x * v2x + v0y * v2y;
+        let dot11 = v1x * v1x + v1y * v1y;
+        let dot12 = v1x * v2x + v1y * v2y;
+        
+        let denom = dot00 * dot11 - dot01 * dot01;
+        if denom.abs() < EPSILON {
+            return false; // Degenerate triangle
+        }
+        
+        let inv_denom = 1.0 / denom;
+        let u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+        let v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+    
+        // Check if point is in triangle
+        return u >= 0.0 && v >= 0.0 && (u + v) <= 1.0;
+
     }
 
     pub fn ray_intersection(
         &self, 
-        origin: &Vec3, 
-        direction: &Vec3
-    ) -> Option<(Vec3, f32, usize)> {
+        origin:    &Vec3A, 
+        direction: &Vec3A
+    ) -> Option<(Vec3A, f32)> {
 
+        const EPSILON: f32 = 0.0000001;
+        let a = self.vertices[0].loc;
+        let b = self.vertices[1].loc;
+        let c = self.vertices[2].loc;
 
-        return None;
+        let edge1 = b - a;
+        let edge2 = c - a;
+        let h = direction.cross(edge2);
+        let a = edge1.dot(h);
+
+        // Ray is parallel to triangle
+        if a > -EPSILON && a < EPSILON {
+            return None;
+        }
+        let f = 1.0 / a;
+        let s = origin - a;
+        let u = f * s.dot(h);
+        
+        if u < 0.0 || u > 1.0 {
+            return None;
+        }
+        
+        let q = s.cross(edge1);
+        let v = f * direction.dot(q);
+        
+        if v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+        
+        // Calculate t (distance along ray)
+        let t = f * edge2.dot(q);
+        
+        if t > EPSILON {
+            let intersection_point = origin + direction * t;
+            return Some((intersection_point, t));
+        } else {
+            return None;
+        }
     }
 
+    fn edges(&self) -> [(Vec2, Vec2); 3] {
+        let a = self.vertices[0].xz();
+        let b = self.vertices[1].xz();
+        let c = self.vertices[2].xz();
+        return [(a,b),(b,c),(c,a)];
+    }
+
+
     pub fn ray_side_intersection(&self, origin: Vec3, direction: Vec3, len: f32) -> (usize, f32) {
-        return self.aabb.ray_side_intersection(origin.into(), direction.into(), len);
+        let ray_segment = (origin.xz(), Vec2::new(origin.x + direction.x, origin.z + direction.z));
+        let edges: [(Vec2, Vec2); 3] = self.edges();
+        let mut distances = Vec::with_capacity(2);
+
+        for e in edges.iter() {
+            if let Some(t) = _line_segments_intersect(e, &ray_segment) {
+                let dist = t * len;
+                distances.push(dist);
+            }
+        }
+        match distances.len(){
+            0 => {return(0, len);}
+            _ => {
+                distances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let min_dist = *distances.iter().next().unwrap();
+                return (distances.len(), min_dist);
+            }
+        }
     }
     
     pub fn circular_edges_index(
@@ -71,11 +180,42 @@ impl PGPolygon {
             .chain(std::iter::once([
                 self.vertices[self.vertices.len() - 1].index,
                 self.vertices[0].index,
-            ]))
+        ]))
     }
-
 }
 
+#[inline(always)]
+fn _cross(a: Vec2, b: Vec2) -> f32 {
+    a.x * b.y - a.y * b.x
+}
+
+#[inline(always)]
+fn _line_segments_intersect(
+    seg1: &(Vec2, Vec2), 
+    seg2: &(Vec2, Vec2)
+) -> Option<f32> {
+
+    let (p1, p2) = seg1;
+    let (p3, p4) = seg2;
+
+    let d1 = p2-p1;
+    let d2 = p4-p3;
+    let d3 = p3-p1;
+    let denom = _cross(d1, d2);
+
+    if denom.abs() < f32::EPSILON {
+        return None; // parallel
+    }
+
+    let t = _cross(d3, d2) / denom;
+    let u = _cross(d3, d1) / denom;
+
+    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+        Some(t)
+    } else {
+        None
+    }
+}
 
 #[derive(Resource, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
 pub struct Navs {
@@ -116,10 +256,10 @@ impl PGNavmesh {
     ) -> Option<(&PGPolygon, f32)> {
 
         if let Some(poly) = self.has_point(loc){
-            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
-            let direction = Vec3::NEG_Y;
+            let origin = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
+            let direction = Vec3A::NEG_Y;
 
-            if let Some((_pos, dist, _index)) = poly.ray_intersection(&origin, &direction){
+            if let Some((_world_pos, dist)) = poly.ray_intersection(&origin, &direction){
                 let dist = dist.round() as i32;
                 let height: i32 = ORIGIN_HEIGHT as i32 - dist;
                 return Some((poly, height as f32));
@@ -131,17 +271,18 @@ impl PGNavmesh {
 
         return None;
     }
-    pub fn ray_intersection(&self, origin: Vec3, direction: Vec3) -> Option<(Vec3, f32, usize)>  {
+
+    pub fn ray_intersection(&self, origin: &Vec3A, direction: &Vec3A) -> Option<(Vec3A, f32, usize)>  {
         let direction = direction.normalize();
-        for (_polygon, polygon) in self.polygons.iter(){
-            if let Some((world_pos, _dist, index)) = polygon.ray_intersection(&origin, &direction){
-                return Some((world_pos, _dist, index));
+        for (polygon_index, polygon) in self.polygons.iter(){
+            if let Some((world_pos, _dist)) = polygon.ray_intersection(&origin, &direction){
+                return Some((world_pos, _dist, *polygon_index));
             }
         }
         return None;
     }
 
-        pub fn has_point(&self, loc: Vec2) -> Option<&PGPolygon> {
+    pub fn has_point(&self, loc: Vec2) -> Option<&PGPolygon> {
         for (_polygon_id, polygon) in self.polygons.iter(){
             if polygon.has_point(&loc){
                 return Some(polygon);
@@ -198,67 +339,11 @@ impl PGNavmesh {
     }
 
     pub fn vertex(&self, id: &usize) -> Option<&PGVertex> {
-
-
-        return None;
+        return self.vertices.get(id);
     }
-
 
     pub fn polygon(&self, id: &usize) -> Option<&PGPolygon> {
-
-        return None;
-    }
-
-
-    // Iterate through polygon neighbours till we find end of raycast
-    pub fn ray_intersection_blocker(
-        &self, 
-        origin: Vec3, 
-        direction: Vec3, 
-        len: f32,
-        origin_polygon: usize,
-        blockers: Vec<NavType>
-    
-    ) -> (bool, f32) {
-
-        // info!("Inside ray intersection blocker");
-        // Need to run till we find the polygon with the end of ray or the first blocker
-        let mut polys_to_check: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
-        let mut polys_buffer: Vec<(&NavType, &usize)> = Vec::with_capacity(10);
-
-        let safety: usize = 5;
-        let mut i: usize = 0;
-
-        let Some(origin_poly) = self.polygons.get(&origin_polygon) else {return (false, 0.0);};
-        polys_to_check.extend(origin_poly.neighbours.iter());
-
-        while i < safety {
-            // info!("Polys to check len: {}", polys_to_check.len());
-            for (typ, poly_id) in polys_to_check.iter(){
-                let Some(poly) = self.polygons.get(*poly_id) else {continue;};
-                let (intersections, min_dist) = poly.ray_side_intersection(origin, direction, len);
-                match (intersections, blockers.contains(typ)) {
-                    (0, _) => {continue; /* Wrong side */}
-                    (1, false) => {return (false, len); /* Reached end of the ray, no blockers*/}
-                    (_, true) => {return (true, min_dist); /* Reached end of the ray, its a blocker*/}
-                    (2, false) => {
-                        // Clear polys to check
-                        // Break loop, clear polys_to_check, add current neighbours of current poly to check
-                        polys_buffer.extend(poly.neighbours.iter());
-                        break;
-                    }
-                    (_,_) => {panic!("Should not happen never");}
-                }
-            }
-            polys_to_check.clear();
-            polys_to_check.extend(polys_buffer.iter());
-            polys_buffer.clear();
-            i += 1;
-
-            // if i == safety {warn!("reached safety");}
-        }
-
-        return (false, 0.0);
+        return self.polygons.get(id);
     }
 
 }
