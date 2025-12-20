@@ -15,7 +15,7 @@ use crate::water::{
 };
 use crate::terrain::TerrainRayMeshData;
 use crate::recast_convert::convert_rerecast;
-use crate::types::{Navs, PGNavmesh, PGPolygon, PGVertex};
+use crate::types::{PGNavmesh, PGPolygon, PGVertex};
 
 pub struct PGNavPlugin;
 
@@ -31,7 +31,7 @@ impl Plugin for PGNavPlugin {
         .add_message::<GenerateNavMesh>()
         .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
-        .insert_resource(Navs::default())
+        // .insert_resource(Navs::default())
 
         .add_observer(generate_terrain_navmesh)
         .add_observer(generate_water_navmesh)
@@ -151,6 +151,14 @@ pub enum PGNavmeshType {
     Terrain,
     Water
 }
+
+#[derive(Component)]
+pub struct NavmeshWater;
+
+#[derive(Component)]
+pub struct NavmeshTerrain;
+
+
 
 #[derive(Event, Message)]
 pub struct GenerateNavMesh {
@@ -380,10 +388,10 @@ fn generate_terrain_navmesh(
 
 fn on_ready_navmesh(
     trigger:             On<NavmeshReady>,
+    mut commands:        Commands,
     ass_nav:             Res<Assets<Navmesh>>,
     navconfig:           Res<NavConfig>,
     navmesh_handles:     Res<RecastNavmeshHandles>,
-    mut navs:            ResMut<Navs>
 ){
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
@@ -396,11 +404,11 @@ fn on_ready_navmesh(
             if navmesh_handle.id() == trigger.0 {
                 match navmesh_type {
                     PGNavmeshType::Terrain => {
-                        navs.terrain = pgn;
+                        commands.spawn((pgn, NavmeshTerrain));
                         return;
                     }
                     PGNavmeshType::Water => {
-                        navs.water = pgn;
+                        commands.spawn((pgn, NavmeshWater));
                         return;
                     }
                 }

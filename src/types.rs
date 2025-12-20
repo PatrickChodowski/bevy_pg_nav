@@ -218,19 +218,19 @@ fn _line_segments_intersect(
     }
 }
 
-#[derive(Resource, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
-pub struct Navs {
-    pub water: PGNavmesh,
-    pub terrain: PGNavmesh
-}
+// #[derive(Resource, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
+// pub struct Navs {
+//     pub water: PGNavmesh,
+//     pub terrain: PGNavmesh
+// }
 
-impl Default for Navs {
-    fn default() -> Self {
-        Navs { water: PGNavmesh::default(), terrain: PGNavmesh::default() }
-    }
-}
+// impl Default for Navs {
+//     fn default() -> Self {
+//         Navs { water: PGNavmesh::default(), terrain: PGNavmesh::default() }
+//     }
+// }
 
-#[derive(Resource, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
+#[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
     pub vertices:     HashMap<usize, PGVertex>,
