@@ -33,11 +33,12 @@ impl PGVertex {
         &self, 
         other: &PGVertex,
         except: &usize
-    ) -> Vec<&usize> {
+    ) -> Vec<usize> {
 
         return self.polygons.iter()
             .filter(|p_index| other.joins(**p_index) && p_index != &except)
-            .collect::<Vec<&usize>>();
+            .map(|x| *x)
+            .collect::<Vec<usize>>();
     }
 }
 

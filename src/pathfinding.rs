@@ -12,7 +12,6 @@ use std::fmt;
 use std::collections::BinaryHeap;
 use crate::types::{PGNavmesh, PGPolygon, PGVertex};
 
-
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
 
@@ -351,7 +350,6 @@ impl<'m> PathFinder<'m> {
 
                 let previous_node = node;
                 node = self.node_buffer.drain(..).next().unwrap();
-
 
                 if node.root == previous_node.root
                     && node.polygon_to == previous_node.polygon_from
