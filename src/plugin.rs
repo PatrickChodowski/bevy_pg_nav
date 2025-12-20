@@ -1,4 +1,5 @@
 use bevy::color::palettes::css::{BLACK, WHITE};
+use serde::{Serialize, Deserialize};
 use std::ops::RangeInclusive;
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use bevy::platform::collections::{HashSet, HashMap};
@@ -26,6 +27,7 @@ impl Plugin for PGNavPlugin {
             Mesh3dBackendPlugin::default(),
             // AvianBackendPlugin::default()
         ))
+        .init_asset::<PGNavmesh>()
         .add_message::<GenerateNavMesh>()
         .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
@@ -115,7 +117,7 @@ impl NavStaticShape {
 
 
 #[derive(
-    Resource, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Clone,
+    Resource, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Clone, Deserialize, Serialize
 )]
 pub struct NavConfig {
     pub water_height: f32,
@@ -144,7 +146,7 @@ fn trigger_navmesh(
     commands.trigger(GenerateNavMesh::default());
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum PGNavmeshType {
     Terrain,
     Water
@@ -186,7 +188,7 @@ impl GenerateNavMesh {
 }
 
 
-#[derive(Resource)]
+#[derive(Resource, Debug)]
 struct RecastNavmeshHandles {
     data: HashMap<PGNavmeshType, Option<Handle<Navmesh>>>
 }
@@ -202,6 +204,7 @@ impl Default for RecastNavmeshHandles {
         }
     }
 }
+
 
 fn on_water_navmesh_sources_ready(
     _trigger:            On<WaterNavmeshesReady>,
@@ -377,29 +380,31 @@ fn generate_terrain_navmesh(
 
 fn on_ready_navmesh(
     trigger:             On<NavmeshReady>,
-    mut commands:        Commands,
     ass_nav:             Res<Assets<Navmesh>>,
     navconfig:           Res<NavConfig>,
-    mut navmesh_handles: ResMut<RecastNavmeshHandles>,
+    navmesh_handles:     Res<RecastNavmeshHandles>,
     mut navs:            ResMut<Navs>
 ){
-    let ready_asset = trigger.0;
-    let Some(recast_navmesh) = ass_nav.get(ready_asset) else {return;};
 
+    let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
     let pgn: PGNavmesh = convert_rerecast(
         recast_navmesh,
         navconfig.water_height
     );
-
-    // for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
-    //     if let Some(navmesh_handle) = maybe_navmesh_handle {
-    //         if navmesh_handle == ready_asset {
-
-    //         }
-    //     }
-    // }
-
-    // navs.
-
-    // commands.insert_resource(pgn);
+    for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
+        if let Some(navmesh_handle) = maybe_navmesh_handle {
+            if navmesh_handle.id() == trigger.0 {
+                match navmesh_type {
+                    PGNavmeshType::Terrain => {
+                        navs.terrain = pgn;
+                        return;
+                    }
+                    PGNavmeshType::Water => {
+                        navs.water = pgn;
+                        return;
+                    }
+                }
+            }
+        }
+    }
 }
