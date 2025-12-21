@@ -146,7 +146,7 @@ fn trigger_navmesh(
     commands.trigger(GenerateNavMesh::default());
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
 pub enum PGNavmeshType {
     Terrain,
     Water

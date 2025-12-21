@@ -1,9 +1,10 @@
 use std::ops::RangeInclusive;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
-
+use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::world::DeferredWorld;
 use crate::pathfinding::{Path, SearchStep, PathFinder};
-use crate::plugin::ORIGIN_HEIGHT;
+use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 
 
 #[derive(Clone, Debug)]
@@ -231,11 +232,13 @@ fn _line_segments_intersect(
 // }
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
+#[component(on_insert=navmesh_on_insert)]
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
     pub vertices:     HashMap<usize, PGVertex>,
     pub water_height: f32,
-    pub search_limit: usize
+    pub search_limit: usize,
+    pub typ:          PGNavmeshType
 }
 
 impl Default for PGNavmesh {
@@ -244,10 +247,19 @@ impl Default for PGNavmesh {
             polygons: HashMap::default(),
             vertices: HashMap::default(),
             water_height: 0.0,
-            search_limit: 1000
+            search_limit: 1000,
+            typ: PGNavmeshType::Terrain
         }
     }
 }
+
+fn navmesh_on_insert(
+    mut _world: DeferredWorld, 
+    HookContext { entity, caller, .. }: HookContext,
+){
+    info!("inserted navmesh to {}", entity);
+}
+
 
 impl PGNavmesh {
 
