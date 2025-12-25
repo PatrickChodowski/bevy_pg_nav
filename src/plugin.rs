@@ -395,13 +395,15 @@ fn on_ready_navmesh(
 ){
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
-    let pgn: PGNavmesh = convert_rerecast(
-        recast_navmesh,
-        navconfig.water_height
-    );
+
     for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
         if let Some(navmesh_handle) = maybe_navmesh_handle {
             if navmesh_handle.id() == trigger.0 {
+                let pgn: PGNavmesh = convert_rerecast(
+                    recast_navmesh,
+                    navconfig.water_height,
+                    navmesh_type
+                );
                 match navmesh_type {
                     PGNavmeshType::Terrain => {
                         commands.spawn((pgn, NavmeshTerrain));

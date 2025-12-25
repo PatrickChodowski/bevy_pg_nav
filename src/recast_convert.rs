@@ -3,7 +3,7 @@ use rerecast::{PolygonNavmesh, DetailNavmesh};
 use bevy_rerecast::Navmesh;
 use bevy::prelude::{info, Vec3A, default};
 
-use crate::types::{PGVertex, PGPolygon, PGNavmesh};
+use crate::{plugin::PGNavmeshType, types::{PGNavmesh, PGPolygon, PGVertex}};
 
 trait RecastPolyMeshDetailExt {
     fn common_vertices(&self) -> HashMap<u32, Vec<u32>>;
@@ -30,7 +30,8 @@ impl RecastPolyMeshDetailExt for DetailNavmesh {
 
 pub(crate) fn convert_rerecast(
     renav: &Navmesh,
-    water_height: f32
+    water_height: f32,
+    typ:   &PGNavmeshType
 ) -> PGNavmesh {
 
     info!("About to convert navmesh!");
@@ -136,6 +137,7 @@ pub(crate) fn convert_rerecast(
         polygons: polygon_map,
         vertices: vertex_map,
         water_height,
+        typ: *typ,
         ..default()
     };
 

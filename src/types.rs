@@ -297,8 +297,9 @@ impl PGNavmesh {
     }
 
     pub fn has_point(&self, loc: Vec2) -> Option<&PGPolygon> {
+        let origin: Vec3A = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
         for (_polygon_id, polygon) in self.polygons.iter(){
-            if polygon.has_point(&loc){
+            if polygon.ray_intersection(&origin, &Vec3A::NEG_Y).is_some(){
                 return Some(polygon);
             }
         }
