@@ -3,11 +3,12 @@ use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
+use serde::{Deserialize, Serialize};
 use crate::pathfinding::{Path, SearchStep, PathFinder};
 use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGVertex {
     pub index:    usize,
     pub loc:      Vec3A,
@@ -45,7 +46,7 @@ impl PGVertex {
 
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGPolygon {
     pub index:      usize,
     pub vertices:   Vec<PGVertex>,
@@ -231,14 +232,16 @@ fn _line_segments_intersect(
 //     }
 // }
 
-#[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
+#[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 #[component(on_insert=navmesh_on_insert)]
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
     pub vertices:     HashMap<usize, PGVertex>,
     pub water_height: f32,
     pub search_limit: usize,
-    pub typ:          PGNavmeshType
+    pub typ:          PGNavmeshType,
+    pub chunk_id:     String,
+    pub map_name:     String
 }
 
 impl Default for PGNavmesh {
@@ -248,7 +251,9 @@ impl Default for PGNavmesh {
             vertices: HashMap::default(),
             water_height: 0.0,
             search_limit: 1000,
-            typ: PGNavmeshType::Terrain
+            typ: PGNavmeshType::Terrain,
+            chunk_id: "".to_string(),
+            map_name: "".to_string()
         }
     }
 }
@@ -321,12 +326,16 @@ impl PGNavmesh {
             return None;
         };
 
+        println!("find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
+
+
 
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
                 length: from.distance(to),
                 path: vec![to].into(),
             };
+            info!("same polygon found path");
             return Some((path, starting_polygon.index, ending_polygon.index));
         }
 
@@ -338,13 +347,16 @@ impl PGNavmesh {
         );
 
         for _s in 0..self.search_limit {
+            info!("{}", _s);
 
              match path_finder.search() {
                 SearchStep::Found(path) => {
                     let offset_path = path.offset_inward(from, agent_radius);
+                    info!("found");
                     return Some((offset_path, starting_polygon.index, ending_polygon.index));
                 }
                 SearchStep::NotFound => {
+                    info!("not found");
                     return None;
                 }
                 SearchStep::Continue => {}

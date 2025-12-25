@@ -1,4 +1,4 @@
-use bevy::log::error_once;
+use bevy::log::{error_once, info};
 use bevy::prelude::{Vec2, Vec3Swizzles, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
@@ -134,15 +134,18 @@ impl<'m> PathFinder<'m> {
             let start: &PGVertex = if let Some(v) = navmesh.vertex(&edge[0]) {
                 v
             } else {
+                info!("cant find vertex {}", &edge[0]);
                 continue;
             };
             let end: &PGVertex = if let Some(v) = navmesh.vertex(&edge[1]) {
                 v
             } else {
+                info!("cant find vertex {}", &edge[1]);
                 continue;
             };
 
             let other_sides = start.common(&end, &from.1);
+            info!("other sides: {:?} between start: {} and end: {}", other_sides, start.index, end.index);
             for other_side in other_sides.iter(){
 
                 path_finder.try_add_node(

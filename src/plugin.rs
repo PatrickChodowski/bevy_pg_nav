@@ -1,5 +1,8 @@
 use bevy::color::palettes::css::{BLACK, WHITE};
 use serde::{Serialize, Deserialize};
+use bevy::tasks::IoTaskPool;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::ops::RangeInclusive;
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use bevy::platform::collections::{HashSet, HashMap};
@@ -37,6 +40,7 @@ impl Plugin for PGNavPlugin {
         .add_observer(generate_water_navmesh)
         .add_observer(on_water_navmesh_sources_ready)
         .add_observer(on_ready_navmesh)
+        .add_observer(on_spawn_navmesh)
         ;
     }
 }
@@ -146,7 +150,7 @@ fn trigger_navmesh(
     commands.trigger(GenerateNavMesh::default());
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize)]
 pub enum PGNavmeshType {
     Terrain,
     Water
@@ -415,6 +419,35 @@ fn on_ready_navmesh(
                     }
                 }
             }
+        }
+    }
+}
+
+fn on_spawn_navmesh(
+   trigger:     On<Add, PGNavmesh>,
+   navs:        Query<&PGNavmesh>,
+   navconfig:   Res<NavConfig>,
+){
+    if let Ok(navmesh) = navs.get(trigger.entity){
+        let navcopy = navmesh.clone();
+        if navconfig.serialize {
+            info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", navmesh.map_name, navmesh.chunk_id);
+
+            let filename = match navcopy.typ {
+                PGNavmeshType::Terrain => {
+                    format!("./assets/navmesh/{}_{}_terrain.navmesh.json", navmesh.map_name, navmesh.chunk_id)
+                }
+                PGNavmeshType::Water => {
+                    format!("./assets/navmesh/{}_{}_water.navmesh.json", navmesh.map_name, navmesh.chunk_id)
+                }
+            };
+            IoTaskPool::get().spawn(async move {
+                let f = File::create(&filename).ok().unwrap();
+                let mut writer = BufWriter::new(f);
+                let _res = serde_json::to_writer(&mut writer, &navcopy);
+                let _res = writer.flush();
+            })
+            .detach();
         }
     }
 }
