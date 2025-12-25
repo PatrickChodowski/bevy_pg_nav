@@ -98,21 +98,21 @@ impl PGPolygon {
     ) -> Option<(Vec3A, f32)> {
 
         const EPSILON: f32 = 0.0000001;
-        let a = self.vertices[0].loc;
-        let b = self.vertices[1].loc;
-        let c = self.vertices[2].loc;
+        let a: Vec3A = self.vertices[0].loc;
+        let b: Vec3A = self.vertices[1].loc;
+        let c: Vec3A = self.vertices[2].loc;
 
-        let edge1 = b - a;
-        let edge2 = c - a;
-        let h = direction.cross(edge2);
-        let a = edge1.dot(h);
+        let edge1: Vec3A = b - a;
+        let edge2: Vec3A = c - a;
+        let h: Vec3A = direction.cross(edge2);
+        let p: f32 = edge1.dot(h);
 
         // Ray is parallel to triangle
-        if a > -EPSILON && a < EPSILON {
+        if p > -EPSILON && p < EPSILON {
             return None;
         }
-        let f = 1.0 / a;
-        let s = origin - a;
+        let f: f32 = 1.0 / p;
+        let s: Vec3A = origin - a;
         let u = f * s.dot(h);
         
         if u < 0.0 || u > 1.0 {
@@ -287,6 +287,7 @@ impl PGNavmesh {
 
     pub fn ray_intersection(&self, origin: &Vec3A, direction: &Vec3A) -> Option<(Vec3A, f32, usize)>  {
         let direction = direction.normalize();
+        // info!("direction: {:?}", direction);
         for (polygon_index, polygon) in self.polygons.iter(){
             if let Some((world_pos, _dist)) = polygon.ray_intersection(&origin, &direction){
                 return Some((world_pos, _dist, *polygon_index));
