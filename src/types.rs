@@ -252,8 +252,8 @@ impl Default for PGNavmesh {
             water_height: 0.0,
             search_limit: 1000,
             typ: PGNavmeshType::Terrain,
-            chunk_id: "".to_string(),
-            map_name: "".to_string()
+            chunk_id: "065".to_string(),
+            map_name: "hedeby".to_string()
         }
     }
 }
