@@ -233,7 +233,6 @@ fn _line_segments_intersect(
 // }
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
-#[component(on_insert=navmesh_on_insert)]
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
     pub vertices:     HashMap<usize, PGVertex>,
@@ -258,15 +257,20 @@ impl Default for PGNavmesh {
     }
 }
 
-fn navmesh_on_insert(
-    mut _world: DeferredWorld, 
-    HookContext { entity, caller, .. }: HookContext,
-){
-    info!("inserted navmesh to {}", entity);
-}
-
 
 impl PGNavmesh {
+    pub fn filename(&self) -> String {
+        let filename = match self.typ {
+            PGNavmeshType::Terrain => {
+                format!("./assets/navmesh/{}_{}_terrain.navmesh.json", self.map_name, self.chunk_id)
+            }
+            PGNavmeshType::Water => {
+                format!("./assets/navmesh/{}_{}_water.navmesh.json", self.map_name, self.chunk_id)
+            }
+        };
+        return filename;
+    }
+
 
     pub fn get_polygon_height(
         &self, 

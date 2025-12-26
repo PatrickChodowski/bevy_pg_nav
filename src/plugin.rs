@@ -34,7 +34,6 @@ impl Plugin for PGNavPlugin {
         .add_message::<GenerateNavMesh>()
         .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
-        // .insert_resource(Navs::default())
 
         .add_observer(generate_terrain_navmesh)
         .add_observer(generate_water_navmesh)
@@ -403,20 +402,23 @@ fn on_ready_navmesh(
     for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
         if let Some(navmesh_handle) = maybe_navmesh_handle {
             if navmesh_handle.id() == trigger.0 {
+                
                 let pgn: PGNavmesh = convert_rerecast(
                     recast_navmesh,
                     navconfig.water_height,
                     navmesh_type
                 );
-                match navmesh_type {
-                    PGNavmeshType::Terrain => {
-                        commands.spawn((pgn, NavmeshTerrain));
-                        return;
-                    }
-                    PGNavmeshType::Water => {
-                        commands.spawn((pgn, NavmeshWater));
-                        return;
-                    }
+
+                commands.spawn(pgn.clone());
+
+                if navconfig.serialize {
+                    IoTaskPool::get().spawn(async move {
+                        let f = File::create(&pgn.filename()).ok().unwrap();
+                        let mut writer = BufWriter::new(f);
+                        let _res = serde_json::to_writer(&mut writer, &pgn);
+                        let _res = writer.flush();
+                    })
+                    .detach();
                 }
             }
         }
@@ -424,30 +426,18 @@ fn on_ready_navmesh(
 }
 
 fn on_spawn_navmesh(
-   trigger:     On<Add, PGNavmesh>,
-   navs:        Query<&PGNavmesh>,
-   navconfig:   Res<NavConfig>,
+   trigger:       On<Add, PGNavmesh>,
+   mut commands:  Commands,
+   navs:          Query<&PGNavmesh>
 ){
     if let Ok(navmesh) = navs.get(trigger.entity){
-        let navcopy = navmesh.clone();
-        if navconfig.serialize {
-            info!("[NAVMESH][GENERATE] Saving Navmesh to json for {} {}", navmesh.map_name, navmesh.chunk_id);
-
-            let filename = match navcopy.typ {
-                PGNavmeshType::Terrain => {
-                    format!("./assets/navmesh/{}_{}_terrain.navmesh.json", navmesh.map_name, navmesh.chunk_id)
-                }
-                PGNavmeshType::Water => {
-                    format!("./assets/navmesh/{}_{}_water.navmesh.json", navmesh.map_name, navmesh.chunk_id)
-                }
-            };
-            IoTaskPool::get().spawn(async move {
-                let f = File::create(&filename).ok().unwrap();
-                let mut writer = BufWriter::new(f);
-                let _res = serde_json::to_writer(&mut writer, &navcopy);
-                let _res = writer.flush();
-            })
-            .detach();
+        match navmesh.typ {
+            PGNavmeshType::Terrain => {
+                commands.entity(trigger.entity).insert(NavmeshTerrain);
+            }
+            PGNavmeshType::Water => {
+                commands.entity(trigger.entity).insert(NavmeshWater);
+            }
         }
     }
 }
