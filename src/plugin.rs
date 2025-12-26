@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 use bevy::tasks::IoTaskPool;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::ops::RangeInclusive;
+use bevy_common_assets::json::JsonAssetPlugin;
 use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy_rerecast::{debug::DetailNavmeshGizmo, prelude::*};
@@ -32,6 +32,7 @@ impl Plugin for PGNavPlugin {
         ))
         .init_asset::<PGNavmesh>()
         .add_message::<GenerateNavMesh>()
+        .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["navmesh.json"]))
         .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
 
@@ -428,7 +429,8 @@ fn on_ready_navmesh(
 fn on_spawn_navmesh(
    trigger:       On<Add, PGNavmesh>,
    mut commands:  Commands,
-   navs:          Query<&PGNavmesh>
+   navs:          Query<&PGNavmesh>,
+   navconfig:     Res<NavConfig>
 ){
     if let Ok(navmesh) = navs.get(trigger.entity){
         match navmesh.typ {
@@ -439,5 +441,9 @@ fn on_spawn_navmesh(
                 commands.entity(trigger.entity).insert(NavmeshWater);
             }
         }
+
+        // if navconfig.debug {
+        //     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
+        // }
     }
 }
