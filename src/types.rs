@@ -1,8 +1,6 @@
 use std::ops::RangeInclusive;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
-use bevy::ecs::lifecycle::HookContext;
-use bevy::ecs::world::DeferredWorld;
 use serde::{Deserialize, Serialize};
 use crate::pathfinding::{Path, SearchStep, PathFinder};
 use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
@@ -322,24 +320,24 @@ impl PGNavmesh {
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
         let Some(starting_polygon) = self.has_point(from) else {
-            println!("no starting polygon index");
+            // println!("no starting polygon index");
             return None;
         };
         let Some(ending_polygon) = self.has_point(to) else {
-            println!("no ending polygon index");
+            // println!("no ending polygon index");
             return None;
         };
 
-        println!("find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
-
-
+        // info!(" [Debug] find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
+        // info!(" start polygon: {:?}", starting_polygon);
+        // info!(" end polygon: {:?}", ending_polygon);
 
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
                 length: from.distance(to),
                 path: vec![to].into(),
             };
-            info!("same polygon found path");
+            // info!(" [Debug] same polygon found path");
             return Some((path, starting_polygon.index, ending_polygon.index));
         }
 
@@ -351,16 +349,16 @@ impl PGNavmesh {
         );
 
         for _s in 0..self.search_limit {
-            info!("{}", _s);
+            // info!(" [Debug] {}", _s);
 
              match path_finder.search() {
                 SearchStep::Found(path) => {
                     let offset_path = path.offset_inward(from, agent_radius);
-                    info!("found");
+                    // info!(" [Debug] found");
                     return Some((offset_path, starting_polygon.index, ending_polygon.index));
                 }
                 SearchStep::NotFound => {
-                    info!("not found");
+                    // info!(" [Debug] not found");
                     return None;
                 }
                 SearchStep::Continue => {}
