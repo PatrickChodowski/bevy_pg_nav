@@ -404,12 +404,13 @@ fn on_ready_navmesh(
         if let Some(navmesh_handle) = maybe_navmesh_handle {
             if navmesh_handle.id() == trigger.0 {
                 
-                let pgn: PGNavmesh = convert_rerecast(
+                let mut pgn: PGNavmesh = convert_rerecast(
                     recast_navmesh,
                     navconfig.water_height,
                     navmesh_type
                 );
 
+                pgn.cleanup_lower();
                 commands.spawn(pgn.clone());
 
                 if navconfig.serialize {

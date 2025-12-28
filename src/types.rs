@@ -246,7 +246,7 @@ impl Default for PGNavmesh {
         PGNavmesh{
             polygons: HashMap::default(),
             vertices: HashMap::default(),
-            water_height: 0.0,
+            water_height: 180.0,
             search_limit: 1000,
             typ: PGNavmeshType::Terrain,
             chunk_id: "065".to_string(),
@@ -364,6 +364,7 @@ impl PGNavmesh {
                 SearchStep::Continue => {}
             }
         }
+        info!(" [Debug] Reached pathfinding limit");
         return None;
     }
 
@@ -373,6 +374,76 @@ impl PGNavmesh {
 
     pub fn polygon(&self, id: &usize) -> Option<&PGPolygon> {
         return self.polygons.get(id);
+    }
+
+
+    pub fn cleanup_lower(&mut self){
+
+        if self.typ != PGNavmeshType::Terrain {
+            return;
+        }
+
+        info!(" [debug] Start Cleanup navmesh");
+
+        let mut polygons_to_rm: HashSet<usize> = HashSet::with_capacity(self.polygons.len());
+        let mut possible_vertices_to_rm: HashSet<usize> = HashSet::with_capacity(self.vertices.len());
+        let mut vertices_to_rm: HashSet<usize> = HashSet::with_capacity(self.vertices.len());
+
+        // if all 3 vertices are below water, remove polygon
+
+        info!("water height: {}", self.water_height);
+        info!(" total vertices {}", self.vertices.len());
+        info!(" total polygons {}", self.polygons.len());
+
+
+        for (polygon_index, polygon) in self.polygons.iter(){
+
+            if polygon.vertices.len() != 3 {
+                error!("Polygon {} has wrong number of vertices: {}", polygon_index, polygon.vertices.len());
+            }
+
+            let mut low_count: usize = 0;
+
+            for v in polygon.vertices.iter(){
+                // info!("v loc: {}", v.loc);
+                if v.loc.y < self.water_height {
+                    low_count += 1;
+                    possible_vertices_to_rm.insert(v.index);
+                }
+            }
+
+            if low_count == 3 {
+                polygons_to_rm.insert(*polygon_index);
+            }
+        }
+
+        // info!("possible vertices to remove count: {}", possible_vertices_to_rm.len());
+
+        for poss_v in possible_vertices_to_rm.iter(){
+
+            let vertex_data = self.vertex(poss_v).unwrap();
+            let mut low_count: usize = 0;
+            for v_polygon in vertex_data.polygons.iter(){
+                if polygons_to_rm.contains(v_polygon){
+                    low_count += 1;
+                }
+            }
+
+            if low_count == vertex_data.polygons.len(){
+                vertices_to_rm.insert(*poss_v);
+            }
+
+        }
+
+        info!("polygons to remove count: {}", polygons_to_rm.len());
+        info!("vertices to remove count: {}", vertices_to_rm.len());
+
+        self.polygons.retain(|key, _| !polygons_to_rm.contains(key));
+        info!("polygons count after: {}", self.polygons.len());
+
+        self.vertices.retain(|key, _| !vertices_to_rm.contains(key));
+        info!("vertices count after: {}", self.vertices.len());
+
     }
 
 }
