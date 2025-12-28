@@ -35,57 +35,24 @@ pub(crate) fn convert_rerecast(
 ) -> PGNavmesh {
 
     info!("About to convert navmesh!");
-    let common_vertices = renav.detail.common_vertices();
     let triangles_with_mesh_info = triangles_with_mesh_info(&renav);
     let areas = areas(&renav.polygon);
 
-    let reindexed_polygons: HashMap<u8, HashSet<usize>> = areas.iter()
-        .map(|area| {(
-            *area,
-            triangles_with_mesh_info
-                .iter()
-                .enumerate()
-                .filter_map(|(original_index, polygon)| {
-                    (*area == polygon.mesh_area).then_some(original_index)
-                })
-                .enumerate()
-                .map(|(_layer_index, original_index)| original_index)
-                .collect::<HashSet<usize>>(),
-        )}).collect();
-
-    let vertices: Vec<PGVertex> = renav.detail.vertices
-        .iter()
-        .enumerate()
+    let mut vertex_map: HashMap<usize, PGVertex> = renav.detail.vertices.iter().enumerate()
         .map(|(vertex_index, vloc)| {
-            PGVertex {
-                index: vertex_index,
-                loc: *vloc,
-                polygons: triangles_with_mesh_info
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(polygon_index, polygon)| {
-                        common_vertices.get(&(vertex_index as u32)).unwrap().iter().find_map(
-                                    |common_vertex_index| {
-                                        polygon
-                                            .vertices
-                                            .contains(&(*common_vertex_index as usize))
-                                            .then(|| {
-                                                reindexed_polygons
-                                                    .get(&polygon.mesh_area)
-                                                    .unwrap()
-                                                    .get(&polygon_index)
-                                                    .cloned()
-                                            })
-                                            .flatten()
-                                    },
-                    )}).collect(),
-        }}).collect();
+            (
+                vertex_index, 
+                PGVertex {
+                    index: vertex_index,
+                    loc: *vloc,
+                    polygons: HashSet::new()
+                }
+            )
+        }).collect();
 
-    let vertex_map = vertices.iter().map(|v| (v.index, v.clone())).collect::<HashMap<usize, PGVertex>>();
+    // Create polygons
     let mut polygons: Vec<PGPolygon> = Vec::new();
-
     for area in areas.iter(){
-
         let area_polygons: Vec<PGPolygon> = triangles_with_mesh_info
             .iter()
             .enumerate()
@@ -95,38 +62,40 @@ pub(crate) fn convert_rerecast(
                 let v0_id = polygon.vertices[2];
                 let v1_id = polygon.vertices[1];
                 let v2_id = polygon.vertices[0];
-
-                let mut neighbours: HashSet<usize> = HashSet::new();
-                let v0 = vertex_map.get(&v0_id).unwrap();
-                let v1 = vertex_map.get(&v1_id).unwrap();
-                let v2 = vertex_map.get(&v2_id).unwrap();
-
-                for n0 in v0.polygons.iter(){
-                    if n0 != &polygon_index {
-                        neighbours.insert(*n0);
-                    }
-                }
-                for n1 in v1.polygons.iter(){
-                    if n1 != &polygon_index {
-                        neighbours.insert(*n1);
-                    }
-                }
-                for n2 in v2.polygons.iter(){
-                    if n2 != &polygon_index {
-                        neighbours.insert(*n2);
-                    }
-                }
-
                 PGPolygon {
                     index: polygon_index,
-                    vertices: vec![v0.index, v1.index, v2.index],
-                    neighbours
+                    vertices: vec![v0_id, v1_id, v2_id],
+                    neighbours: HashSet::new()
                 }
             })
             .collect();
 
         polygons.extend(area_polygons);
+    }
 
+    // Assign polygons to vertices
+    for (vertex_index, vertex) in vertex_map.iter_mut(){
+        for polygon in polygons.iter(){
+            for v in polygon.vertices.iter(){
+                if v == vertex_index {
+                    vertex.polygons.insert(polygon.index);
+                }
+            }
+        }
+    }
+
+    // Assign neighbours inside polygons
+    for polygon in polygons.iter_mut(){
+        let mut neighbours: HashSet<usize> = HashSet::new();
+        for vertex_index in polygon.vertices.iter(){
+            let vertex = vertex_map.get(vertex_index).unwrap();
+            for v_polygon in vertex.polygons.iter(){
+                if &polygon.index != v_polygon {
+                    neighbours.insert(*v_polygon);
+                }
+            }
+        }
+        polygon.neighbours = neighbours;
     }
 
     info!("polygons length: {}", polygons.len());

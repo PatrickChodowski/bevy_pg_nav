@@ -1,8 +1,8 @@
 use bevy::color::palettes::css::WHITE_SMOKE;
 use bevy::prelude::*;
 
-use crate::plugin::NavConfig;
-use crate::types::{PGNavmesh, PGPolygon, PGVertex};
+use crate::plugin::{NavConfig, PGNavmeshType};
+use crate::types::PGNavmesh;
 
 
 pub struct PGNavDebugPlugin;
@@ -28,9 +28,14 @@ fn display(
     }
 
     for pgn in navmeshes.iter(){
-        for (polygon_id, polygon) in pgn.polygons.iter(){
+
+        if pgn.typ != PGNavmeshType::Terrain {
+            continue;
+        }
+
+        for (_polygon_id, polygon) in pgn.polygons.iter(){
             let [a,b,c] = polygon.locs(pgn);
-            gizmos.linestrip([a,b,c], Color::from(WHITE_SMOKE));
+            gizmos.linestrip([a,b,c, a], Color::from(WHITE_SMOKE));
         }
     }
 }

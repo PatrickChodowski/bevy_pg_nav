@@ -449,6 +449,10 @@ impl PGNavmesh {
             polygon.neighbours.retain(|n| !polygons_to_rm.contains(n));
         }
 
+        for (_vertex_id, vertex) in self.vertices.iter_mut(){
+            vertex.polygons.retain(|n| !polygons_to_rm.contains(n));
+        }
+
     }
 
 }

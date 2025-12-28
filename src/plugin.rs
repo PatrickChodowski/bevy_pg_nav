@@ -31,6 +31,7 @@ impl Plugin for PGNavPlugin {
             Mesh3dBackendPlugin::default(),
             // AvianBackendPlugin::default()
         ))
+        .insert_resource(NavConfig::default())
         .init_asset::<PGNavmesh>()
         .add_message::<GenerateNavMesh>()
         .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["navmesh.json"]))
