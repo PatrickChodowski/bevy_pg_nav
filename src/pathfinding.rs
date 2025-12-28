@@ -1,4 +1,4 @@
-use bevy::log::{error_once, info};
+use bevy::log::{error_once, info, error};
 use bevy::prelude::{Vec2, Vec3Swizzles, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
@@ -292,8 +292,13 @@ impl<'m> PathFinder<'m> {
 
                 for other_side in other_sides.iter(){
 
+                    let Some(other_side_polygon) = self.navmesh.polygon(other_side) else {
+                        error!("cant find {} from other_side", other_side);
+                        return;
+                    };
+
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
-                    if self.polygon_to != *other_side && self.navmesh.polygons[other_side].neighbours.len() == 1{
+                    if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1{
                         // println!(" [debug] Dead End: Prune edges leading to only one polygon that is not target");
                         continue;
                     }
@@ -388,13 +393,13 @@ impl<'m> PathFinder<'m> {
         let Some(polygon) = self.navmesh.polygon(&node.polygon_to) else {return successors;};
         let edge: Vec2 = self.navmesh.vertices[&node.edge.1].xz();
         let right_index: usize = polygon.vertices.iter().enumerate()
-            .find(|(_, v)| {v.xz().distance_squared(edge) < 0.001})
+            .find(|(_, v_index)| {self.navmesh.vertex(v_index).unwrap().xz().distance_squared(edge) < 0.001})
             .map(|(i, _)| i)
             .unwrap_or_else(|| {
                     let mut distances = polygon
                         .vertices
                         .iter()
-                        .map(|v| {(v.xz()).distance_squared(edge)})
+                        .map(|v_index| {(self.navmesh.vertex(v_index).unwrap().xz()).distance_squared(edge)})
                         .enumerate()
                         .collect::<Vec<_>>();
                     distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());

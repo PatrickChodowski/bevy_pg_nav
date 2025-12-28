@@ -1,3 +1,4 @@
+mod debug;
 mod pathfinding;
 mod plugin;
 mod recast_convert;

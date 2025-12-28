@@ -9,7 +9,7 @@ use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGVertex {
     pub index:    usize,
-    pub loc:      Vec3A,
+    pub loc:      Vec3,
     pub polygons: HashSet<usize>
 }
 impl PGVertex {
@@ -25,10 +25,6 @@ impl PGVertex {
         return self.loc.xz();
     }
 
-    fn joins(&self, index: usize) -> bool {
-        return self.polygons.contains(&index);
-    }
-
     pub fn common(
         &self, 
         other: &PGVertex,
@@ -36,7 +32,7 @@ impl PGVertex {
     ) -> Vec<usize> {
 
         return self.polygons.iter()
-            .filter(|p_index| other.joins(**p_index) && p_index != &except)
+            .filter(|p_index| other.polygons.contains(*p_index) && p_index != &except)
             .map(|x| *x)
             .collect::<Vec<usize>>();
     }
@@ -47,20 +43,22 @@ impl PGVertex {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGPolygon {
     pub index:      usize,
-    pub vertices:   Vec<PGVertex>,
+    // pub vertices:   Vec<PGVertex>,
+    pub vertices:   Vec<usize>,
     pub neighbours: HashSet<usize>
 }
 
 impl PGPolygon {
     pub fn has_point(
         &self, 
-        loc: &Vec2
+        loc: &Vec2,
+        pgn: &PGNavmesh
     ) -> bool {
         const EPSILON: f32 = 0.0000001;
 
-        let a = self.vertices[0].xz();
-        let b = self.vertices[1].xz();
-        let c = self.vertices[2].xz();
+        let a = pgn.vertex(&self.vertices[0]).unwrap().xz();
+        let b = pgn.vertex(&self.vertices[1]).unwrap().xz();
+        let c = pgn.vertex(&self.vertices[2]).unwrap().xz();
 
         // Calculate barycentric coordinates
         let v0x = c.x - a.x;
@@ -90,20 +88,26 @@ impl PGPolygon {
 
     }
 
+    pub fn locs(&self, pgn: &PGNavmesh) -> [Vec3; 3] {
+        let a: Vec3 = pgn.vertex(&self.vertices[0]).unwrap().loc;
+        let b: Vec3 = pgn.vertex(&self.vertices[1]).unwrap().loc;
+        let c: Vec3 = pgn.vertex(&self.vertices[2]).unwrap().loc;
+        return [a,b,c];
+    }
+
     pub fn ray_intersection(
         &self, 
-        origin:    &Vec3A, 
-        direction: &Vec3A
-    ) -> Option<(Vec3A, f32)> {
+        origin:    &Vec3, 
+        direction: &Vec3,
+        pgn:       &PGNavmesh
+    ) -> Option<(Vec3, f32)> {
 
         const EPSILON: f32 = 0.0000001;
-        let a: Vec3A = self.vertices[0].loc;
-        let b: Vec3A = self.vertices[1].loc;
-        let c: Vec3A = self.vertices[2].loc;
+        let [a,b,c] = self.locs(pgn);
 
-        let edge1: Vec3A = b - a;
-        let edge2: Vec3A = c - a;
-        let h: Vec3A = direction.cross(edge2);
+        let edge1: Vec3 = b - a;
+        let edge2: Vec3 = c - a;
+        let h: Vec3 = direction.cross(edge2);
         let p: f32 = edge1.dot(h);
 
         // Ray is parallel to triangle
@@ -111,7 +115,7 @@ impl PGPolygon {
             return None;
         }
         let f: f32 = 1.0 / p;
-        let s: Vec3A = origin - a;
+        let s: Vec3 = origin - a;
         let u = f * s.dot(h);
         
         if u < 0.0 || u > 1.0 {
@@ -136,17 +140,23 @@ impl PGPolygon {
         }
     }
 
-    fn edges(&self) -> [(Vec2, Vec2); 3] {
-        let a = self.vertices[0].xz();
-        let b = self.vertices[1].xz();
-        let c = self.vertices[2].xz();
+    fn edges(&self, pgn: &PGNavmesh) -> [(Vec2, Vec2); 3] {
+        let a: Vec2 = pgn.vertex(&self.vertices[0]).unwrap().xz();
+        let b: Vec2 = pgn.vertex(&self.vertices[1]).unwrap().xz();
+        let c: Vec2 = pgn.vertex(&self.vertices[2]).unwrap().xz();
         return [(a,b),(b,c),(c,a)];
     }
 
+    pub fn ray_side_intersection(
+        &self, 
+        origin: Vec3, 
+        direction: Vec3, 
+        len: f32,
+        pgn: &PGNavmesh
+    ) -> (usize, f32) {
 
-    pub fn ray_side_intersection(&self, origin: Vec3, direction: Vec3, len: f32) -> (usize, f32) {
         let ray_segment = (origin.xz(), Vec2::new(origin.x + direction.x, origin.z + direction.z));
-        let edges: [(Vec2, Vec2); 3] = self.edges();
+        let edges: [(Vec2, Vec2); 3] = self.edges(pgn);
         let mut distances = Vec::with_capacity(2);
 
         for e in edges.iter() {
@@ -177,10 +187,10 @@ impl PGPolygon {
     pub fn edges_index(&self) -> impl Iterator<Item = [usize; 2]> + '_ {
         self.vertices
             .windows(2)
-            .map(|pair| [pair[0].index, pair[1].index])
+            .map(|pair| [pair[0], pair[1]])
             .chain(std::iter::once([
-                self.vertices[self.vertices.len() - 1].index,
-                self.vertices[0].index,
+                self.vertices[self.vertices.len() - 1],
+                self.vertices[0],
         ]))
     }
 }
@@ -217,18 +227,6 @@ fn _line_segments_intersect(
         None
     }
 }
-
-// #[derive(Resource, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath)]
-// pub struct Navs {
-//     pub water: PGNavmesh,
-//     pub terrain: PGNavmesh
-// }
-
-// impl Default for Navs {
-//     fn default() -> Self {
-//         Navs { water: PGNavmesh::default(), terrain: PGNavmesh::default() }
-//     }
-// }
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 pub struct PGNavmesh {
@@ -276,10 +274,10 @@ impl PGNavmesh {
     ) -> Option<(&PGPolygon, f32)> {
 
         if let Some(poly) = self.has_point(loc){
-            let origin = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
-            let direction = Vec3A::NEG_Y;
+            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
+            let direction = Vec3::NEG_Y;
 
-            if let Some((_world_pos, dist)) = poly.ray_intersection(&origin, &direction){
+            if let Some((_world_pos, dist)) = poly.ray_intersection(&origin, &direction, &self){
                 let dist = dist.round() as i32;
                 let height: i32 = ORIGIN_HEIGHT as i32 - dist;
                 return Some((poly, height as f32));
@@ -292,11 +290,11 @@ impl PGNavmesh {
         return None;
     }
 
-    pub fn ray_intersection(&self, origin: &Vec3A, direction: &Vec3A) -> Option<(Vec3A, f32, usize)>  {
+    pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(Vec3, f32, usize)>  {
         let direction = direction.normalize();
         // info!("direction: {:?}", direction);
         for (polygon_index, polygon) in self.polygons.iter(){
-            if let Some((world_pos, _dist)) = polygon.ray_intersection(&origin, &direction){
+            if let Some((world_pos, _dist)) = polygon.ray_intersection(&origin, &direction, &self){
                 return Some((world_pos, _dist, *polygon_index));
             }
         }
@@ -304,9 +302,9 @@ impl PGNavmesh {
     }
 
     pub fn has_point(&self, loc: Vec2) -> Option<&PGPolygon> {
-        let origin: Vec3A = Vec3A::new(loc.x, ORIGIN_HEIGHT, loc.y);
+        let origin: Vec3 = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
         for (_polygon_id, polygon) in self.polygons.iter(){
-            if polygon.ray_intersection(&origin, &Vec3A::NEG_Y).is_some(){
+            if polygon.ray_intersection(&origin, &Vec3::NEG_Y, &self).is_some(){
                 return Some(polygon);
             }
         }
@@ -391,24 +389,27 @@ impl PGNavmesh {
 
         // if all 3 vertices are below water, remove polygon
 
-        info!("water height: {}", self.water_height);
-        info!(" total vertices {}", self.vertices.len());
-        info!(" total polygons {}", self.polygons.len());
+        info!(" [debug] water height: {}", self.water_height);
+        info!(" [debug] total vertices {}", self.vertices.len());
+        info!(" [debug] total polygons {}", self.polygons.len());
 
 
         for (polygon_index, polygon) in self.polygons.iter(){
 
             if polygon.vertices.len() != 3 {
-                error!("Polygon {} has wrong number of vertices: {}", polygon_index, polygon.vertices.len());
+                error!(" [debug] Polygon {} has wrong number of vertices: {}", polygon_index, polygon.vertices.len());
             }
 
             let mut low_count: usize = 0;
 
-            for v in polygon.vertices.iter(){
+            for v_index in polygon.vertices.iter(){
+
+                let v = self.vertex(v_index).unwrap();
+
                 // info!("v loc: {}", v.loc);
                 if v.loc.y < self.water_height {
                     low_count += 1;
-                    possible_vertices_to_rm.insert(v.index);
+                    possible_vertices_to_rm.insert(*v_index);
                 }
             }
 
@@ -435,14 +436,18 @@ impl PGNavmesh {
 
         }
 
-        info!("polygons to remove count: {}", polygons_to_rm.len());
-        info!("vertices to remove count: {}", vertices_to_rm.len());
+        info!(" [debug] polygons to remove count: {}", polygons_to_rm.len());
+        info!(" [debug] vertices to remove count: {}", vertices_to_rm.len());
 
         self.polygons.retain(|key, _| !polygons_to_rm.contains(key));
-        info!("polygons count after: {}", self.polygons.len());
+        info!(" [debug] polygons count after: {}", self.polygons.len());
 
         self.vertices.retain(|key, _| !vertices_to_rm.contains(key));
-        info!("vertices count after: {}", self.vertices.len());
+        info!(" [debug] vertices count after: {}", self.vertices.len());
+
+        for (_polygon_index, polygon) in self.polygons.iter_mut(){
+            polygon.neighbours.retain(|n| !polygons_to_rm.contains(n));
+        }
 
     }
 

@@ -1,7 +1,7 @@
 use bevy::platform::collections::{HashSet, HashMap};
 use rerecast::{PolygonNavmesh, DetailNavmesh};
 use bevy_rerecast::Navmesh;
-use bevy::prelude::{info, Vec3A, default};
+use bevy::prelude::{info, default};
 
 use crate::{plugin::PGNavmeshType, types::{PGNavmesh, PGPolygon, PGVertex}};
 
@@ -59,7 +59,7 @@ pub(crate) fn convert_rerecast(
         .map(|(vertex_index, vloc)| {
             PGVertex {
                 index: vertex_index,
-                loc: Vec3A::from(*vloc),
+                loc: *vloc,
                 polygons: triangles_with_mesh_info
                     .iter()
                     .enumerate()
@@ -119,7 +119,7 @@ pub(crate) fn convert_rerecast(
 
                 PGPolygon {
                     index: polygon_index,
-                    vertices: vec![v0.clone(), v1.clone(), v2.clone()],
+                    vertices: vec![v0.index, v1.index, v2.index],
                     neighbours
                 }
             })
@@ -131,7 +131,6 @@ pub(crate) fn convert_rerecast(
 
     info!("polygons length: {}", polygons.len());
     let polygon_map = polygons.iter().map(|p| (p.index, p.clone())).collect::<HashMap<usize, PGPolygon>>();
-    let vertex_map = vertices.iter().map(|v| (v.index, v.clone())).collect::<HashMap<usize, PGVertex>>();
 
     let pgn = PGNavmesh {
         polygons: polygon_map,
