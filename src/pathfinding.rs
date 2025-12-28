@@ -1,4 +1,4 @@
-use bevy::log::error_once;
+use bevy::log::{error_once, info, error};
 use bevy::prelude::{Vec2, Vec3Swizzles, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
@@ -10,8 +10,9 @@ use std::{
 };
 use std::fmt;
 use std::collections::BinaryHeap;
-use crate::navmesh::{NavMesh, Polygon, Vertex};
-use crate::types::NavType;
+use crate::types::{PGNavmesh, PGPolygon, PGVertex};
+
+pub(crate) const DEBUG: bool = true;
 
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
@@ -98,8 +99,7 @@ pub struct PathFinder<'m> {
     pub to: Vec2,
     // pub polygon_from: usize,
     pub polygon_to: usize,
-    pub navmesh: &'m NavMesh,
-    blockers: Vec<NavType>
+    pub navmesh: &'m PGNavmesh
 }
 
 
@@ -113,22 +113,10 @@ impl<'m> PathFinder<'m> {
     }
 
     pub fn setup(
-        navmesh: &'m NavMesh,
+        navmesh: &'m PGNavmesh,
         from: (Vec2, usize),    
-        to:   (Vec2, usize),
-        blockers: Option<Vec<NavType>>
+        to:   (Vec2, usize)
     ) -> Self {
-
-        // If no blockers are provided, apply NavType::Blocker by default
-        let path_blockers: Vec<NavType>;
-        if let Some(blockers) = blockers {
-            path_blockers = blockers;
-        } else {
-            path_blockers = vec![
-                NavType::Blocker
-            ]
-        }
-
         let mut path_finder = PathFinder{
             queue: BinaryHeap::with_capacity(15),
             node_buffer: Vec::with_capacity(10),
@@ -137,34 +125,41 @@ impl<'m> PathFinder<'m> {
             to: to.0,
             // polygon_from: from.1,
             polygon_to: to.1,
-            navmesh,
-            blockers: path_blockers.clone()
+            navmesh
         };
 
         let empty_node = Node::empty(from);
-        let starting_polygon: &&Polygon = &navmesh.polygon(&from.1).unwrap();
+        let starting_polygon: &&PGPolygon = &navmesh.polygon(&from.1).unwrap();
 
         for edge in starting_polygon.edges_index() {
 
-            let start: &Vertex = if let Some(v) = navmesh.vertex(&edge[0]) {
+            let start: &PGVertex = if let Some(v) = navmesh.vertex(&edge[0]) {
                 v
             } else {
+                if DEBUG {
+                    info!(" [debug] cant find vertex {}", &edge[0]);
+                }
                 continue;
             };
-            let end: &Vertex = if let Some(v) = navmesh.vertex(&edge[1]) {
+            let end: &PGVertex = if let Some(v) = navmesh.vertex(&edge[1]) {
                 v
             } else {
+                if DEBUG {
+                    info!(" [debug] cant find vertex {}", &edge[1]);
+                }
                 continue;
             };
 
-            let other_sides = start.common(&end, &from.1, &path_blockers);
-
+            let other_sides = start.common(&end, &from.1);
+            if DEBUG {
+                info!(" [debug] other sides: {:?} between start vertex: {} and end vertex: {}", other_sides, start.index, end.index);
+            }
 
             for other_side in other_sides.iter(){
 
                 path_finder.try_add_node(
                     from.0,
-                    **other_side,
+                    *other_side,
                     (start.xz(), edge[0]),
                     (end.xz(), edge[1]),
                     &empty_node,
@@ -189,20 +184,26 @@ impl<'m> PathFinder<'m> {
         node:       &Node,
     ){
         if self.navmesh.polygons.get(&other_side).is_none(){
+            if DEBUG {
+                info!(" [debug] error node");
+            }
             return;
         }
 
         let mut new_f = node.distance_start_to_root;
         let mut path = node.path.clone();
+
         if root != node.root {
             path.push(root);
             new_f += node.root.distance(root);
         }
-        let heuristic_to_end: f32;
-        heuristic_to_end = heuristic(root, self.to, (start.0, end.0));
+
+        let heuristic_to_end: f32 = heuristic(root, self.to, (start.0, end.0));
         
         if new_f.is_nan() || heuristic_to_end.is_nan() {
-            // println!("newf or heuristic to end is nan");
+            if DEBUG {
+                info!(" [debug] newf or heuristic to end is nan");
+            }
             return;
         }
 
@@ -237,27 +238,30 @@ impl<'m> PathFinder<'m> {
     pub fn search(&mut self) -> SearchStep {
         if let Some(next_node) = self.pop_node() {
 
-            // println!("popped off: {:?} ({})", next_node, next_node.polygon_from);
-
-            // println!("Root history: {:?}", self.root_history);
-
+            if DEBUG {
+                info!(" [debug] popped off: {:?} ({})", next_node, next_node.polygon_from);
+                info!(" [debug] Root history: {:?}", self.root_history);
+            }
             if let Some(o) = self.root_history.get(&Root(next_node.root)) {
                 if o < &next_node.distance_start_to_root {
-                    // println!("node is dominated!");
                     return SearchStep::Continue;
                 }
             }
             if next_node.polygon_to == self.polygon_to {
                 let mut path = next_node.path;
-                if let Some(turn) = turning_point(next_node.root, self.to, next_node.interval) {
-                    // println!("New turn: {}", turn);
 
+                if let Some(turn) = turning_point(next_node.root, self.to, next_node.interval) {
+                    if DEBUG {
+                        info!(" [debug] New turn: {}", turn);  
+                    }
                     path.push(turn);
                 }
+
                 let complete = next_node.polygon_to == self.polygon_to;
                 if complete {
                     path.push(self.to);
                 }
+
                 return SearchStep::Found(Path {
                     path,
                     length: next_node.distance_start_to_root + next_node.heuristic
@@ -285,32 +289,47 @@ impl<'m> PathFinder<'m> {
         loop {
             for successor in self.edges_between(&node).iter() {
                 let [successor_edge_0, successor_edge_1] = successor.edge;
-                let start: &Vertex = self.navmesh.vertex(&successor_edge_0).unwrap();
-                let end: &Vertex = self.navmesh.vertex(&successor_edge_1).unwrap();
+                let start: &PGVertex = self.navmesh.vertex(&successor_edge_0).unwrap();
+                let end: &PGVertex = self.navmesh.vertex(&successor_edge_1).unwrap();
                 let start_loc: Vec2 = start.xz();
                 let end_loc: Vec2 = end.xz();
-                let other_sides = start.common(&end, &node.polygon_to, &self.blockers);
+                let other_sides = start.common(&end, &node.polygon_to);
 
                 if other_sides.len() == 0 {
-                    // println!("No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
+                    if DEBUG {
+                        info!(" [debug] No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
+                    }
                     continue;
                 }
 
                 if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
-                    // println!("Successor distance interval too short");
+                    if DEBUG {
+                        info!("  [debug] Successor distance interval too short");
+                    }
                     continue;
                 }
 
                 for other_side in other_sides.iter(){
 
+                    let Some(other_side_polygon) = self.navmesh.polygon(other_side) else {
+                        if DEBUG {
+                            error!("cant find {} from other_side", other_side);
+                        }
+                        return;
+                    };
+
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
-                    if &self.polygon_to != *other_side && self.navmesh.polygons[*other_side].neighbours.len() == 1{
-                        // println!("Dead End: Prune edges leading to only one polygon that is not target");
+                    if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1{
+                        if DEBUG {
+                            info!(" [debug] Dead End: Prune edges leading to only one polygon that is not target");
+                        }
                         continue;
                     }
 
-                    if &node.polygon_from == *other_side {
-                        // println!("If other side is polygon from: not going back");
+                    if node.polygon_from == *other_side {
+                        if DEBUG {
+                            info!(" [debug] If other side is polygon from: not going back");
+                        }
                         continue;
                     }
 
@@ -321,8 +340,8 @@ impl<'m> PathFinder<'m> {
                             if successor.interval.0.distance_squared(start_loc) > EPSILON {
                                 continue;
                             }
-                            let vertex: &Vertex = self.navmesh.vertices.get(&node.edge.0).unwrap();
-                            let is_corner = vertex.is_corner(&self.blockers);
+                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.0).unwrap();
+                            let is_corner = vertex.is_corner();
                             let dist = vertex.xz().distance_squared(node.interval.0);
 
                             // let interval_dist = node.interval.0.distance_squared(node.interval.1);
@@ -338,10 +357,9 @@ impl<'m> PathFinder<'m> {
                             if (successor.interval.1).distance_squared(end_loc) > EPSILON {
                                 continue;
                             }
-                            let vertex: &Vertex = self.navmesh.vertices.get(&node.edge.1).unwrap();
+                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.1).unwrap();
                             let dist = vertex.xz().distance_squared(node.interval.1);
-                            let is_corner = vertex.is_corner(&self.blockers);
-
+                            let is_corner = vertex.is_corner();
                             if is_corner && dist < EPSILON{
                                 node.interval.1
                             } else {
@@ -351,12 +369,14 @@ impl<'m> PathFinder<'m> {
                     };
 
                     if root != node.root {
-                        // println!("  New root: {:?}", root);
+                        if DEBUG {
+                            info!(" [debug]  New root: {:?}", root);
+                        }
                     }
 
                     self.try_add_node(
                         root,
-                        **other_side,
+                        *other_side,
                         (successor.interval.0, successor_edge_0), //start
                         (successor.interval.1, successor_edge_1), // end
                         &node,
@@ -368,7 +388,6 @@ impl<'m> PathFinder<'m> {
 
                 let previous_node = node;
                 node = self.node_buffer.drain(..).next().unwrap();
-
 
                 if node.root == previous_node.root
                     && node.polygon_to == previous_node.polygon_from
@@ -398,119 +417,115 @@ impl<'m> PathFinder<'m> {
     fn edges_between(&self, node: &Node) -> SmallVec<[Successor; 10]> {
         let mut successors = SmallVec::new();
 
-        if let Some(polygon) = self.navmesh.polygon(&node.polygon_to) {
-            let edge: Vec2 = self.navmesh.vertices[&node.edge.1].loc.xz();
-            let right_index = polygon
-                .vertices
-                .iter()
-                .enumerate()
-                .find(|(_, v)| {v.loc.xz().distance_squared(edge) < 0.001})
-                .map(|(i, _)| i)
-                .unwrap_or_else(|| {
+        let Some(polygon) = self.navmesh.polygon(&node.polygon_to) else {return successors;};
+        let edge: Vec2 = self.navmesh.vertices[&node.edge.1].xz();
+        let right_index: usize = polygon.vertices.iter().enumerate()
+            .find(|(_, v_index)| {self.navmesh.vertex(v_index).unwrap().xz().distance_squared(edge) < 0.001})
+            .map(|(i, _)| i)
+            .unwrap_or_else(|| {
                     let mut distances = polygon
                         .vertices
                         .iter()
-                        .map(|v| {(v.loc.xz()).distance_squared(edge)})
+                        .map(|v_index| {(self.navmesh.vertex(v_index).unwrap().xz()).distance_squared(edge)})
                         .enumerate()
                         .collect::<Vec<_>>();
                     distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
                     distances.first().unwrap().0
-                })+ 1;
-            let left_index = polygon.vertices.len() + right_index - 2;
-            let mut typ = SuccessorType::RightNonObservable;
-            for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
+            })+ 1;
 
-                let Some(start) = self.navmesh.vertex(&edge0) else {error_once!("Lack of vertex for {}", &edge[0]); continue; }; // TODO: changed to error_once but there will be more
-                let Some(end)  = self.navmesh.vertex(&edge1) else {error_once!("Lack of vertex for {}", &edge[1]); continue; };
+        let left_index = polygon.vertices.len() + right_index - 2;
+        let mut typ = SuccessorType::RightNonObservable;
 
-                let mut start_point = Vec2::new(start.loc.x, start.loc.z);
-                let end_point = Vec2::new(end.loc.x, end.loc.z);
-                let edge_side = start_point.side((node.root, node.interval.0));
+        for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
+
+            let Some(start) = self.navmesh.vertex(&edge0) else {error_once!("Lack of vertex for {}", &edge[0]); continue}; // TODO: changed to error_once but there will be more
+            let Some(end)  = self.navmesh.vertex(&edge1) else {error_once!("Lack of vertex for {}", &edge[1]); continue};
+
+            let mut start_point = start.xz();
+            let end_point = end.xz();
+            let edge_side = start_point.side((node.root, node.interval.0));
 
 
-                match edge_side{
-                    EdgeSide::Right => {
-                        if let Some(intersect) = line_intersect_segment(
-                            (node.root, node.interval.0),
-                            (start_point, end_point),
-                        ) {
-                            if intersect.distance_squared(start_point) > 1.0e-6
-                                && intersect.distance_squared(end_point) > 1.0e-6
-                            {
-                                successors.push(Successor {
-                                    interval: (start_point, intersect),
-                                    edge: [edge0, edge1],
-                                    typ,
-                                });
-                                start_point = intersect;
-                            } else {
-                            }
-                            if intersect.distance_squared(end_point) > 1.0e-6 {
-                                typ = SuccessorType::Observable;
-                            }
-                        }
-                    }
-                    EdgeSide::Left => {
-                        if typ == SuccessorType::RightNonObservable {
-                            typ = SuccessorType::Observable;
-                        }
-                    }
-
-                    EdgeSide::Edge => {
-                        let endpoint_side = end_point.side((node.root, node.interval.0));
-                        match endpoint_side {
-                            EdgeSide::Edge | EdgeSide::Left => {
-                                typ = SuccessorType::Observable;
-                            }
-                            _ => (),
-                        }
-                    }
-                }
-                let mut end_intersection_p = None;
-                let mut found_intersection = false;
-                let end_root_int1 = end_point.side((node.root, node.interval.1));
-
-                if end_root_int1 == EdgeSide::Left {
-                    if let Some(intersect) =
-                        line_intersect_segment((node.root, node.interval.1), (start_point, end_point))
-                    {
-
-                        if intersect.distance_squared(end_point) > 1.0e-6 {
-                            end_intersection_p = Some(intersect);
-                        } else {
-                        }
-                        found_intersection = true;
-                    }
-                }
-                successors.push(Successor {
-                    interval: (start_point, end_intersection_p.unwrap_or(end_point)),
-                    edge: [edge0, edge1],
-                    typ,
-                });
-                match end_root_int1 {
-                    EdgeSide::Left => {
-                        if found_intersection {
-                            typ = SuccessorType::LeftNonObservable;
-                        }
-                        if let Some(intersect) = end_intersection_p {
+            match edge_side{
+                EdgeSide::Right => {
+                    if let Some(intersect) = line_intersect_segment(
+                        (node.root, node.interval.0),
+                        (start_point, end_point),
+                    ) {
+                        if intersect.distance_squared(start_point) > 1.0e-6
+                            && intersect.distance_squared(end_point) > 1.0e-6
+                        {
                             successors.push(Successor {
-                                interval: (intersect, end_point),
+                                interval: (start_point, intersect),
                                 edge: [edge0, edge1],
                                 typ,
                             });
+                            start_point = intersect;
+                        } else {
+                        }
+                        if intersect.distance_squared(end_point) > 1.0e-6 {
+                            typ = SuccessorType::Observable;
                         }
                     }
-                    EdgeSide::Edge => match end_point.side((node.root, node.interval.0)) {
+                }
+                EdgeSide::Left => {
+                    if typ == SuccessorType::RightNonObservable {
+                        typ = SuccessorType::Observable;
+                    }
+                }
+
+                EdgeSide::Edge => {
+                    let endpoint_side = end_point.side((node.root, node.interval.0));
+                    match endpoint_side {
                         EdgeSide::Edge | EdgeSide::Left => {
-                            typ = SuccessorType::LeftNonObservable;
+                            typ = SuccessorType::Observable;
                         }
                         _ => (),
-                    },
-                    _ => (),
+                    }
                 }
             }
-        }
+            let mut end_intersection_p = None;
+            let mut found_intersection = false;
+            let end_root_int1_side = end_point.side((node.root, node.interval.1));
 
+            if end_root_int1_side == EdgeSide::Left {
+                if let Some(intersect) = line_intersect_segment((node.root, node.interval.1), (start_point, end_point)){
+                    if intersect.distance_squared(end_point) > 1.0e-6 {
+                        end_intersection_p = Some(intersect);
+                    } else {}
+                    found_intersection = true;
+                }
+            }
+
+            successors.push(Successor {
+                interval: (start_point, end_intersection_p.unwrap_or(end_point)),
+                edge: [edge0, edge1],
+                typ,
+            });
+
+            match end_root_int1_side {
+                EdgeSide::Left => {
+                    if found_intersection {
+                        typ = SuccessorType::LeftNonObservable;
+                    }
+                    if let Some(intersect) = end_intersection_p {
+                        successors.push(Successor {
+                            interval: (intersect, end_point),
+                            edge: [edge0, edge1],
+                            typ,
+                        });
+                    }
+                }
+                EdgeSide::Edge => match end_point.side((node.root, node.interval.0)) {
+                    EdgeSide::Edge | EdgeSide::Left => {
+                        typ = SuccessorType::LeftNonObservable;
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        
         // println!("Successors for {:?}: {:?}", node, successors);
         return successors;
     }
@@ -676,12 +691,12 @@ impl Vec2Helper for Vec2 {
             x if x.abs() < EPSILON => EdgeSide::Edge,
 
             // ORIGINAL:
-            // x if x > 0.0 => EdgeSide::Left,
-            // _ => EdgeSide::Right,
+            x if x > 0.0 => EdgeSide::Left,
+            _ => EdgeSide::Right,
             
             // my hack, no idea why:
-            x if x > 0.0 => EdgeSide::Right,
-            _ => EdgeSide::Left,
+            // x if x > 0.0 => EdgeSide::Right,
+            // _ => EdgeSide::Left,
         }
     }
 

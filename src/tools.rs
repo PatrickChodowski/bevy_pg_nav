@@ -1,7 +1,8 @@
 use bevy::prelude::{Vec2, Vec3A, Vec3};
 use bevy::math::Ray3d;
 use std::f32::EPSILON;
-use crate::navmesh::ORIGIN_HEIGHT;
+
+use crate::plugin::ORIGIN_HEIGHT;
 
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub struct NavRay {
@@ -27,7 +28,7 @@ impl NavRay {
         self.direction.into()
     }
 
-    pub(crate) fn down(x: f32, z: f32) -> Self {
+    pub fn down(x: f32, z: f32) -> Self {
         let origin = Vec3::new(x, ORIGIN_HEIGHT, z);
         let dir = Vec3::NEG_Y;
         NavRay {
@@ -127,29 +128,5 @@ impl IntersectionData {
             distance,
             triangle_index
         }
-    }
-}
-
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct AABB {
-    pub(crate) min_x: f32,
-    pub(crate) max_x: f32,
-    pub(crate) min_z: f32,
-    pub(crate) max_z: f32,
-}
-
-impl AABB {
-    pub(crate) fn dims(&self) -> Vec2 {
-        return Vec2::new(self.max_x - self.min_x, self.max_z-self.min_z)
-    }
-    pub(crate) fn from_loc_dims(loc: Vec3, dims: Vec2) -> Self {
-        let aabb = AABB {
-            min_x: loc.x - dims.x,
-            max_x: loc.x + dims.x,
-            min_z: loc.z - dims.y,
-            max_z: loc.z + dims.y,
-        };
-        return aabb;
     }
 }
