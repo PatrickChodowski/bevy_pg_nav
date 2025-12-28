@@ -12,6 +12,8 @@ use std::fmt;
 use std::collections::BinaryHeap;
 use crate::types::{PGNavmesh, PGPolygon, PGVertex};
 
+pub(crate) const DEBUG: bool = true;
+
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
 
@@ -134,18 +136,25 @@ impl<'m> PathFinder<'m> {
             let start: &PGVertex = if let Some(v) = navmesh.vertex(&edge[0]) {
                 v
             } else {
-                // info!(" [debug] cant find vertex {}", &edge[0]);
+                if DEBUG {
+                    info!(" [debug] cant find vertex {}", &edge[0]);
+                }
                 continue;
             };
             let end: &PGVertex = if let Some(v) = navmesh.vertex(&edge[1]) {
                 v
             } else {
-                // info!(" [debug] cant find vertex {}", &edge[1]);
+                if DEBUG {
+                    info!(" [debug] cant find vertex {}", &edge[1]);
+                }
                 continue;
             };
 
             let other_sides = start.common(&end, &from.1);
-            // info!(" [debug] other sides: {:?} between start vertex: {} and end vertex: {}", other_sides, start.index, end.index);
+            if DEBUG {
+                info!(" [debug] other sides: {:?} between start vertex: {} and end vertex: {}", other_sides, start.index, end.index);
+            }
+
             for other_side in other_sides.iter(){
 
                 path_finder.try_add_node(
@@ -175,7 +184,9 @@ impl<'m> PathFinder<'m> {
         node:       &Node,
     ){
         if self.navmesh.polygons.get(&other_side).is_none(){
-            // info!(" [debug] error node");
+            if DEBUG {
+                info!(" [debug] error node");
+            }
             return;
         }
 
@@ -190,7 +201,9 @@ impl<'m> PathFinder<'m> {
         let heuristic_to_end: f32 = heuristic(root, self.to, (start.0, end.0));
         
         if new_f.is_nan() || heuristic_to_end.is_nan() {
-            println!(" [debug] newf or heuristic to end is nan");
+            if DEBUG {
+                info!(" [debug] newf or heuristic to end is nan");
+            }
             return;
         }
 
@@ -225,12 +238,12 @@ impl<'m> PathFinder<'m> {
     pub fn search(&mut self) -> SearchStep {
         if let Some(next_node) = self.pop_node() {
 
-            // info!(" [debug] popped off: {:?} ({})", next_node, next_node.polygon_from);
-            // info!(" [debug] Root history: {:?}", self.root_history);
-
+            if DEBUG {
+                info!(" [debug] popped off: {:?} ({})", next_node, next_node.polygon_from);
+                info!(" [debug] Root history: {:?}", self.root_history);
+            }
             if let Some(o) = self.root_history.get(&Root(next_node.root)) {
                 if o < &next_node.distance_start_to_root {
-                    // info!("  [debug] node is dominated!");
                     return SearchStep::Continue;
                 }
             }
@@ -238,7 +251,9 @@ impl<'m> PathFinder<'m> {
                 let mut path = next_node.path;
 
                 if let Some(turn) = turning_point(next_node.root, self.to, next_node.interval) {
-                    // info!(" [debug] New turn: {}", turn);
+                    if DEBUG {
+                        info!(" [debug] New turn: {}", turn);  
+                    }
                     path.push(turn);
                 }
 
@@ -281,30 +296,40 @@ impl<'m> PathFinder<'m> {
                 let other_sides = start.common(&end, &node.polygon_to);
 
                 if other_sides.len() == 0 {
-                    // info!(" [debug] No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
+                    if DEBUG {
+                        info!(" [debug] No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
+                    }
                     continue;
                 }
 
                 if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
-                    // info!("  [debug] Successor distance interval too short");
+                    if DEBUG {
+                        info!("  [debug] Successor distance interval too short");
+                    }
                     continue;
                 }
 
                 for other_side in other_sides.iter(){
 
                     let Some(other_side_polygon) = self.navmesh.polygon(other_side) else {
-                        error!("cant find {} from other_side", other_side);
+                        if DEBUG {
+                            error!("cant find {} from other_side", other_side);
+                        }
                         return;
                     };
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
                     if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1{
-                        // println!(" [debug] Dead End: Prune edges leading to only one polygon that is not target");
+                        if DEBUG {
+                            info!(" [debug] Dead End: Prune edges leading to only one polygon that is not target");
+                        }
                         continue;
                     }
 
                     if node.polygon_from == *other_side {
-                        // println!(" [debug] If other side is polygon from: not going back");
+                        if DEBUG {
+                            info!(" [debug] If other side is polygon from: not going back");
+                        }
                         continue;
                     }
 
@@ -344,7 +369,9 @@ impl<'m> PathFinder<'m> {
                     };
 
                     if root != node.root {
-                        // println!(" [debug]  New root: {:?}", root);
+                        if DEBUG {
+                            info!(" [debug]  New root: {:?}", root);
+                        }
                     }
 
                     self.try_add_node(

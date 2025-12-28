@@ -2,9 +2,9 @@ use std::ops::RangeInclusive;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
 use serde::{Deserialize, Serialize};
-use crate::pathfinding::{Path, SearchStep, PathFinder};
-use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 
+use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
+use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGVertex {
@@ -318,24 +318,30 @@ impl PGNavmesh {
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
         let Some(starting_polygon) = self.has_point(from) else {
-            // println!("no starting polygon index");
+            if DEBUG {
+                info!("no starting polygon index");
+            }
+            // 
             return None;
         };
         let Some(ending_polygon) = self.has_point(to) else {
             // println!("no ending polygon index");
             return None;
         };
-
-        // info!(" [Debug] find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
-        // info!(" start polygon: {:?}", starting_polygon);
-        // info!(" end polygon: {:?}", ending_polygon);
+        if DEBUG {
+            info!(" [Debug] find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
+            info!(" start polygon: {:?}", starting_polygon);
+            info!(" end polygon: {:?}", ending_polygon);
+        }
 
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
                 length: from.distance(to),
                 path: vec![to].into(),
             };
-            // info!(" [Debug] same polygon found path");
+            if DEBUG {
+                info!(" [Debug] same polygon found path");
+            }
             return Some((path, starting_polygon.index, ending_polygon.index));
         }
 
@@ -347,22 +353,31 @@ impl PGNavmesh {
         );
 
         for _s in 0..self.search_limit {
-            // info!(" [Debug] {}", _s);
-
+            if DEBUG {
+                info!(" [Debug] {}", _s);
+            }
              match path_finder.search() {
                 SearchStep::Found(path) => {
                     let offset_path = path.offset_inward(from, agent_radius);
-                    // info!(" [Debug] found");
+                    if DEBUG {
+                        info!(" [Debug] found");
+                    }
+                    
                     return Some((offset_path, starting_polygon.index, ending_polygon.index));
                 }
                 SearchStep::NotFound => {
-                    // info!(" [Debug] not found");
+                    if DEBUG {
+                        info!(" [Debug] not found");
+                    }
                     return None;
                 }
                 SearchStep::Continue => {}
             }
         }
-        info!(" [Debug] Reached pathfinding limit");
+        if DEBUG {
+            info!(" [Debug] Reached pathfinding limit");
+        }
+
         return None;
     }
 
@@ -381,7 +396,10 @@ impl PGNavmesh {
             return;
         }
 
-        info!(" [debug] Start Cleanup navmesh");
+        if DEBUG {
+            info!(" [debug] Start Cleanup navmesh");
+        }
+
 
         let mut polygons_to_rm: HashSet<usize> = HashSet::with_capacity(self.polygons.len());
         let mut possible_vertices_to_rm: HashSet<usize> = HashSet::with_capacity(self.vertices.len());
@@ -389,15 +407,19 @@ impl PGNavmesh {
 
         // if all 3 vertices are below water, remove polygon
 
-        info!(" [debug] water height: {}", self.water_height);
-        info!(" [debug] total vertices {}", self.vertices.len());
-        info!(" [debug] total polygons {}", self.polygons.len());
-
+        if DEBUG {
+            info!(" [debug] water height: {}", self.water_height);
+            info!(" [debug] total vertices {}", self.vertices.len());
+            info!(" [debug] total polygons {}", self.polygons.len());
+        }
 
         for (polygon_index, polygon) in self.polygons.iter(){
 
             if polygon.vertices.len() != 3 {
-                error!(" [debug] Polygon {} has wrong number of vertices: {}", polygon_index, polygon.vertices.len());
+                if DEBUG {
+                    error!(" [debug] Polygon {} has wrong number of vertices: {}", polygon_index, polygon.vertices.len());
+                }
+
             }
 
             let mut low_count: usize = 0;
@@ -435,15 +457,21 @@ impl PGNavmesh {
             }
 
         }
+        if DEBUG {
+            info!(" [debug] polygons to remove count: {}", polygons_to_rm.len());
+            info!(" [debug] vertices to remove count: {}", vertices_to_rm.len()); 
+        }
 
-        info!(" [debug] polygons to remove count: {}", polygons_to_rm.len());
-        info!(" [debug] vertices to remove count: {}", vertices_to_rm.len());
 
         self.polygons.retain(|key, _| !polygons_to_rm.contains(key));
-        info!(" [debug] polygons count after: {}", self.polygons.len());
+        if DEBUG {
+            info!(" [debug] polygons count after: {}", self.polygons.len());
+        }
 
         self.vertices.retain(|key, _| !vertices_to_rm.contains(key));
-        info!(" [debug] vertices count after: {}", self.vertices.len());
+        if DEBUG {
+            info!(" [debug] vertices count after: {}", self.vertices.len()); 
+        }
 
         for (_polygon_index, polygon) in self.polygons.iter_mut(){
             polygon.neighbours.retain(|n| !polygons_to_rm.contains(n));
