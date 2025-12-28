@@ -321,11 +321,12 @@ impl PGNavmesh {
             if DEBUG {
                 info!("no starting polygon index");
             }
-            // 
             return None;
         };
         let Some(ending_polygon) = self.has_point(to) else {
-            // println!("no ending polygon index");
+            if DEBUG {
+                info!("no ending polygon index");
+            }
             return None;
         };
         if DEBUG {
