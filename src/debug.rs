@@ -14,7 +14,8 @@ impl Plugin for PGNavDebugPlugin {
     fn build(&self, app: &mut App) {
         app
         .add_systems(OnEnter(GameState::Play), init)
-        .add_systems(Update, display)
+        .add_systems(Update, display_pointer)
+        .add_systems(Update, display_all)
         ;
     }
 }
@@ -45,7 +46,34 @@ fn init(
     ));
 }
 
-fn display(
+fn display_all(
+    navconfig:  Res<NavConfig>,
+    navmeshes:  Query<&PGNavmesh>,
+    mut gizmos: Gizmos,
+){
+    if !navconfig.debug {
+        return
+    }
+
+    for pgn in navmeshes.iter(){
+        if pgn.typ != PGNavmeshType::Water {
+            continue;
+        }
+        for (polygon_id, polygon) in pgn.polygons.iter(){
+            let mut clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
+            let [a,b,c] = polygon.locs(pgn);
+            gizmos.linestrip([a,b,c,a], clr);
+            for vertex_id in polygon.vertices.iter(){
+                let vertex = pgn.vertex(vertex_id).unwrap();
+                gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
+            }
+        }
+    }
+}
+
+
+
+fn display_pointer(
     navconfig:  Res<NavConfig>,
     navmeshes:  Query<&PGNavmesh>,
     mut gizmos: Gizmos,
@@ -59,7 +87,7 @@ fn display(
 
     for pgn in navmeshes.iter(){
 
-        if pgn.typ != PGNavmeshType::Terrain {
+        if pgn.typ != PGNavmeshType::Water {
             continue;
         }
 
