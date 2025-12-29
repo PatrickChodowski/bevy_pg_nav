@@ -8,7 +8,8 @@ mod tools;
 mod types;
 
 pub mod prelude {
-    pub use crate::pathfinding::{Path, PathFinder};
+    pub use crate::debug::display_polygon;
+    pub use crate::pathfinding::{Path, PathFinder, SearchStep};
     pub use crate::plugin::{
         GenerateNavMesh, NavConfig, PGNavPlugin, NavStatic, 
         NavStaticShape, NavStaticType, NavmeshTerrain, NavmeshWater, PGNavmeshType

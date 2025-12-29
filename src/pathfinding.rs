@@ -1,5 +1,5 @@
 use bevy::log::{error_once, info, error};
-use bevy::prelude::{Vec2, Vec3Swizzles, Reflect};
+use bevy::prelude::{Vec2, Vec3Swizzles, Reflect, Entity};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
 use serde::{Serialize, Deserialize};
@@ -7,6 +7,7 @@ use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
     fmt::Debug,
+    sync::Arc
 };
 use std::fmt;
 use std::collections::BinaryHeap;
@@ -91,7 +92,7 @@ pub enum SearchStep {
     Continue,
 }
 
-pub struct PathFinder<'m> {
+pub struct PathFinder {
     queue: BinaryHeap<Node>,
     node_buffer: Vec<Node>,
     root_history: HashMap<Root, f32>,
@@ -99,11 +100,11 @@ pub struct PathFinder<'m> {
     pub to: Vec2,
     // pub polygon_from: usize,
     pub polygon_to: usize,
-    pub navmesh: &'m PGNavmesh
+    pub navmesh: Arc<PGNavmesh>
 }
 
 
-impl<'m> PathFinder<'m> {
+impl PathFinder {
     #[allow(dead_code)]
     pub fn best(&self) -> Option<&Node> {
         for n in self.queue.iter(){
@@ -113,7 +114,7 @@ impl<'m> PathFinder<'m> {
     }
 
     pub fn setup(
-        navmesh: &'m PGNavmesh,
+        navmesh: &PGNavmesh,
         from: (Vec2, usize),    
         to:   (Vec2, usize)
     ) -> Self {
@@ -125,7 +126,7 @@ impl<'m> PathFinder<'m> {
             to: to.0,
             // polygon_from: from.1,
             polygon_to: to.1,
-            navmesh
+            navmesh: Arc::new(navmesh.clone())
         };
 
         let empty_node = Node::empty(from);
@@ -536,14 +537,14 @@ impl<'m> PathFinder<'m> {
 
 #[derive(PartialEq)]
 pub struct Node {
-    path:                   SmallVec<[Vec2;10]>,
-    root:                   Vec2,
-    interval:               (Vec2, Vec2),
-    edge:                   (usize, usize),
-    polygon_from:           usize,
-    polygon_to:             usize,
-    distance_start_to_root: f32,
-    heuristic:              f32,
+    pub path:                   SmallVec<[Vec2;10]>,
+    pub root:                   Vec2,
+    pub interval:               (Vec2, Vec2),
+    pub edge:                   (usize, usize),
+    pub polygon_from:           usize,
+    pub polygon_to:             usize,
+    pub distance_start_to_root: f32,
+    pub heuristic:              f32,
 }
 
 impl Node {
@@ -551,7 +552,6 @@ impl Node {
         from: (Vec2, usize)
     ) -> Self {
         let empty_node = Node {
-            // path: vec![],
             path: SmallVec::new(),
             root: from.0,
             interval: (Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)),
@@ -563,10 +563,6 @@ impl Node {
         };
         return empty_node;
     }
-
-//     fn is(&self, indices: &Vec<usize>) -> bool {
-//         indices.contains(&self.polygon_from) || indices.contains(&self.polygon_to)
-//     }
 }
 
 impl fmt::Debug for Node {

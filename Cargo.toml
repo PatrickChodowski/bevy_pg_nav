@@ -31,5 +31,4 @@ avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
 bevy_rerecast = {path="../rerecast/crates/bevy_rerecast"}
 dashmap = {version="6.1.0", features = ["rayon"] }
 rayon = "1.11.0"
-spade = "2.15.0"
 earcutr = "0.5.0"

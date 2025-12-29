@@ -330,7 +330,7 @@ impl PGNavmesh {
             return None;
         };
         if DEBUG {
-            info!(" [Debug] find path between {:?} and {}", starting_polygon.index, ending_polygon.index);
+            info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
             info!(" start polygon: {:?}", starting_polygon);
             info!(" end polygon: {:?}", ending_polygon);
         }

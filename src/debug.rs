@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_pg_core::prelude::{GameState, PointerData};
 
 use crate::plugin::{NavConfig, PGNavmeshType};
-use crate::types::PGNavmesh;
+use crate::types::{PGNavmesh, PGPolygon};
 
 
 pub struct PGNavDebugPlugin;
@@ -15,7 +15,7 @@ impl Plugin for PGNavDebugPlugin {
         app
         .add_systems(OnEnter(GameState::Play), init)
         .add_systems(Update, display_pointer)
-        .add_systems(Update, display_all)
+        // .add_systems(Update, display_all)
         ;
     }
 }
@@ -55,14 +55,13 @@ fn display_all(
         return
     }
 
+    let clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
     for pgn in navmeshes.iter(){
-        if pgn.typ != PGNavmeshType::Water {
+        if pgn.typ != PGNavmeshType::Terrain {
             continue;
         }
-        for (polygon_id, polygon) in pgn.polygons.iter(){
-            let mut clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
-            let [a,b,c] = polygon.locs(pgn);
-            gizmos.linestrip([a,b,c,a], clr);
+        for (_polygon_id, polygon) in pgn.polygons.iter(){
+            display_polygon(polygon, pgn, &mut gizmos, &clr);
             for vertex_id in polygon.vertices.iter(){
                 let vertex = pgn.vertex(vertex_id).unwrap();
                 gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
@@ -87,7 +86,7 @@ fn display_pointer(
 
     for pgn in navmeshes.iter(){
 
-        if pgn.typ != PGNavmeshType::Water {
+        if pgn.typ != PGNavmeshType::Terrain {
             continue;
         }
 
@@ -110,9 +109,7 @@ fn display_pointer(
                     for pv in polygon.vertices.iter(){
                         text.0 += &format!(" \n {:?}", pgn.vertex(pv).unwrap());
                     }
-
-                    let [a,b,c] = polygon.locs(pgn);
-                    gizmos.linestrip([a,b,c,a], clr);
+                    display_polygon(polygon, pgn, &mut gizmos, &clr);
                     for vertex_id in polygon.vertices.iter(){
                         let vertex = pgn.vertex(vertex_id).unwrap();
                         gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
@@ -124,10 +121,22 @@ fn display_pointer(
             }
         }
 
-        for npoly in display_neighbours.iter(){
-            let [a,b,c] = pgn.polygon(npoly).unwrap().locs(pgn);
-            gizmos.linestrip([a,b,c,a], Color::from(WHITE_SMOKE).with_alpha(0.2));
+        let white_clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
+        for npoly_id in display_neighbours.iter(){
+            let npolygon = pgn.polygon(npoly_id).unwrap();
+            display_polygon(npolygon, pgn, &mut gizmos, &white_clr);
         }
 
     }
+}
+
+
+pub fn display_polygon(
+    polygon: &PGPolygon,
+    pgn:     &PGNavmesh,
+    gizmos:  &mut Gizmos,
+    clr:     &Color
+){
+    let [a,b,c] = polygon.locs(pgn);
+    gizmos.linestrip([a,b,c,a], *clr);
 }
