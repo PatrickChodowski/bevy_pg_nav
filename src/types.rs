@@ -387,7 +387,7 @@ impl PGNavmesh {
     }
 
     pub fn polygon(&self, id: &usize) -> &PGPolygon {
-        return self.polygons.get(id).unwrap();
+        return self.polygons.get(id).expect(&format!("expected polygon {}", id));
     }
 
 

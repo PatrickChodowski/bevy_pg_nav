@@ -295,6 +295,7 @@ impl PathFinder {
 
                 for other_side in other_sides.iter(){
 
+                    if other_side == &usize::MAX {continue}
                     let other_side_polygon = self.navmesh.polygon(other_side);
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning

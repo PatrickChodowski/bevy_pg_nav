@@ -1,4 +1,4 @@
-use bevy::color::palettes::css::WHITE_SMOKE;
+use bevy::color::palettes::css::{WHITE_SMOKE, GREEN};
 use bevy::color::palettes::tailwind::ORANGE_500;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -56,6 +56,8 @@ fn display_all(
     }
 
     let clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
+    let vertex_clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
+    let corner_clr = Color::from(GREEN).with_alpha(0.4);
     for pgn in navmeshes.iter(){
         if pgn.typ != PGNavmeshType::Terrain {
             continue;
@@ -64,7 +66,12 @@ fn display_all(
             display_polygon(polygon, pgn, &mut gizmos, &clr);
             for vertex_id in polygon.vertices.iter(){
                 let vertex = pgn.vertex(vertex_id);
-                gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
+
+                if vertex.is_corner(){
+                    gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, corner_clr);
+                } else {
+                    gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, vertex_clr);
+                }
             }
         }
     }
