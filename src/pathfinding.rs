@@ -372,9 +372,9 @@ impl PathFinder {
             }
 
             if self.node_buffer.len() == 1 && self.node_buffer[0].polygon_to != self.polygon_to {
-
-                info!(" [debug] ONLY ONE node in node_buffer");
-
+                if DEBUG {
+                    info!(" [debug] ONLY ONE node in node_buffer");
+                }
                 let previous_node = node;
                 node = self.node_buffer.drain(..).next().unwrap();
 
