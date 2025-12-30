@@ -45,7 +45,7 @@ pub(crate) fn convert_rerecast(
                 PGVertex {
                     index: vertex_index,
                     loc: *vloc,
-                    polygons: HashSet::new()
+                    polygons: Vec::new()
                 }
             )
         }).collect();
@@ -90,7 +90,7 @@ pub(crate) fn convert_rerecast(
         for polygon in polygons.iter(){
             for v in polygon.vertices.iter(){
                 if v == vertex_index {
-                    vertex.polygons.insert(polygon.index);
+                    vertex.polygons.push(polygon.index);
                 }
             }
         }
@@ -238,12 +238,14 @@ fn deduplicate(
             continue;
         }
 
-        let mut polygons: HashSet<usize> = HashSet::new();
+        let mut polygons: Vec<usize> = Vec::new();
         for mv in cluster.iter(){
             for p in vertex_map.get(mv).unwrap().polygons.iter(){
-                polygons.insert(*p);
+                polygons.push(*p);
             }
         }
+        polygons.sort_unstable();
+        polygons.dedup();
 
         let pgv = PGVertex {
             index: *min_idx,

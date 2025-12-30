@@ -11,7 +11,6 @@ use bevy_rerecast::Mesh3dBackendPlugin;
 use bevy_pg_core::prelude::TerrainChunk;
 
 use crate::debug::PGNavDebugPlugin;
-use crate::pathfinding::{Path, SearchStep, PathFinder};
 use crate::water::{
     raycasts_rain, remove_collinear, order_boundary, 
     group_waters, triangulate, mesh_from_triangles,
@@ -19,7 +18,7 @@ use crate::water::{
 };
 use crate::terrain::TerrainRayMeshData;
 use crate::recast_convert::convert_rerecast;
-use crate::types::{PGNavmesh, PGPolygon, PGVertex};
+use crate::types::PGNavmesh;
 
 pub struct PGNavPlugin;
 
@@ -142,7 +141,7 @@ impl Default for NavConfig {
             offset_y: 20.0,
             iter_count_limit: 20,
             serialize: true,
-            debug: false
+            debug: true
         }
     }
 }
@@ -414,6 +413,7 @@ fn on_ready_navmesh(
                 );
 
                 pgn.cleanup_lower();
+                pgn.reorder_vertex_polygons();
                 commands.spawn(pgn.clone());
 
                 if navconfig.serialize {

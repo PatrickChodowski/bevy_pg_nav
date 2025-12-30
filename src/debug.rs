@@ -15,7 +15,7 @@ impl Plugin for PGNavDebugPlugin {
         app
         .add_systems(OnEnter(GameState::Play), init)
         .add_systems(Update, display_pointer)
-        // .add_systems(Update, display_all)
+        .add_systems(Update, display_all)
         ;
     }
 }
@@ -63,7 +63,7 @@ fn display_all(
         for (_polygon_id, polygon) in pgn.polygons.iter(){
             display_polygon(polygon, pgn, &mut gizmos, &clr);
             for vertex_id in polygon.vertices.iter(){
-                let vertex = pgn.vertex(vertex_id).unwrap();
+                let vertex = pgn.vertex(vertex_id);
                 gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
             }
         }
@@ -76,13 +76,15 @@ fn display_pointer(
     navconfig:  Res<NavConfig>,
     navmeshes:  Query<&PGNavmesh>,
     mut gizmos: Gizmos,
-    pointer:    Res<PointerData>,
+    pointer:    Option<Res<PointerData>>,
     mut text:   Single<&mut Text, With<PGNavDebugText>>
 ){
 
     if !navconfig.debug {
         return
     }
+
+    let Some(pointer) = pointer else {return};
 
     for pgn in navmeshes.iter(){
 
@@ -107,11 +109,11 @@ fn display_pointer(
 
                     text.0 = format!("{:?}", polygon);
                     for pv in polygon.vertices.iter(){
-                        text.0 += &format!(" \n {:?}", pgn.vertex(pv).unwrap());
+                        text.0 += &format!(" \n {:?}", pgn.vertex(pv));
                     }
                     display_polygon(polygon, pgn, &mut gizmos, &clr);
                     for vertex_id in polygon.vertices.iter(){
-                        let vertex = pgn.vertex(vertex_id).unwrap();
+                        let vertex = pgn.vertex(vertex_id);
                         gizmos.sphere(Isometry3d::from_translation(vertex.loc), 3.0, clr);
                     }
 
@@ -123,7 +125,7 @@ fn display_pointer(
 
         let white_clr = Color::from(WHITE_SMOKE).with_alpha(0.2);
         for npoly_id in display_neighbours.iter(){
-            let npolygon = pgn.polygon(npoly_id).unwrap();
+            let npolygon = pgn.polygon(npoly_id);
             display_polygon(npolygon, pgn, &mut gizmos, &white_clr);
         }
 

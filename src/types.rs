@@ -10,15 +10,11 @@ use crate::plugin::{ORIGIN_HEIGHT, PGNavmeshType};
 pub struct PGVertex {
     pub index:    usize,
     pub loc:      Vec3,
-    pub polygons: HashSet<usize>
+    pub polygons: Vec<usize>
 }
 impl PGVertex {
     pub fn is_corner(&self) -> bool {
-        if self.polygons.len() == 1 {
-            return true;
-        } else {
-            return false;
-        }
+        self.polygons.contains(&usize::MAX)
     }
 
     pub fn xz(&self) -> Vec2 {
@@ -43,7 +39,6 @@ impl PGVertex {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGPolygon {
     pub index:      usize,
-    // pub vertices:   Vec<PGVertex>,
     pub vertices:   Vec<usize>,
     pub neighbours: HashSet<usize>
 }
@@ -56,9 +51,9 @@ impl PGPolygon {
     ) -> bool {
         const EPSILON: f32 = 0.0000001;
 
-        let a = pgn.vertex(&self.vertices[0]).unwrap().xz();
-        let b = pgn.vertex(&self.vertices[1]).unwrap().xz();
-        let c = pgn.vertex(&self.vertices[2]).unwrap().xz();
+        let a = pgn.vertex(&self.vertices[0]).xz();
+        let b = pgn.vertex(&self.vertices[1]).xz();
+        let c = pgn.vertex(&self.vertices[2]).xz();
 
         // Calculate barycentric coordinates
         let v0x = c.x - a.x;
@@ -85,14 +80,18 @@ impl PGPolygon {
     
         // Check if point is in triangle
         return u >= 0.0 && v >= 0.0 && (u + v) <= 1.0;
-
     }
 
     pub fn locs(&self, pgn: &PGNavmesh) -> [Vec3; 3] {
-        let a: Vec3 = pgn.vertex(&self.vertices[0]).unwrap().loc;
-        let b: Vec3 = pgn.vertex(&self.vertices[1]).unwrap().loc;
-        let c: Vec3 = pgn.vertex(&self.vertices[2]).unwrap().loc;
+        let a: Vec3 = pgn.vertex(&self.vertices[0]).loc;
+        let b: Vec3 = pgn.vertex(&self.vertices[1]).loc;
+        let c: Vec3 = pgn.vertex(&self.vertices[2]).loc;
         return [a,b,c];
+    }
+
+    pub fn center(&self, pgn: &PGNavmesh) -> Vec3 {
+        let [a,b,c] = self.locs(pgn);
+        return (a + b + c)/3.0;
     }
 
     pub fn ray_intersection(
@@ -141,9 +140,10 @@ impl PGPolygon {
     }
 
     fn edges(&self, pgn: &PGNavmesh) -> [(Vec2, Vec2); 3] {
-        let a: Vec2 = pgn.vertex(&self.vertices[0]).unwrap().xz();
-        let b: Vec2 = pgn.vertex(&self.vertices[1]).unwrap().xz();
-        let c: Vec2 = pgn.vertex(&self.vertices[2]).unwrap().xz();
+        let [a3,b3,c3] = self.locs(pgn);
+        let a = a3.xz();
+        let b = b3.xz();
+        let c = c3.xz();
         return [(a,b),(b,c),(c,a)];
     }
 
@@ -382,12 +382,12 @@ impl PGNavmesh {
         return None;
     }
 
-    pub fn vertex(&self, id: &usize) -> Option<&PGVertex> {
-        return self.vertices.get(id);
+    pub fn vertex(&self, id: &usize) -> &PGVertex {
+        return self.vertices.get(id).unwrap();
     }
 
-    pub fn polygon(&self, id: &usize) -> Option<&PGPolygon> {
-        return self.polygons.get(id);
+    pub fn polygon(&self, id: &usize) -> &PGPolygon {
+        return self.polygons.get(id).unwrap();
     }
 
 
@@ -427,7 +427,7 @@ impl PGNavmesh {
 
             for v_index in polygon.vertices.iter(){
 
-                let v = self.vertex(v_index).unwrap();
+                let v = self.vertex(v_index);
 
                 // info!("v loc: {}", v.loc);
                 if v.loc.y < self.water_height {
@@ -445,7 +445,7 @@ impl PGNavmesh {
 
         for poss_v in possible_vertices_to_rm.iter(){
 
-            let vertex_data = self.vertex(poss_v).unwrap();
+            let vertex_data = self.vertex(poss_v);
             let mut low_count: usize = 0;
             for v_polygon in vertex_data.polygons.iter(){
                 if polygons_to_rm.contains(v_polygon){
@@ -480,6 +480,100 @@ impl PGNavmesh {
 
         for (_vertex_id, vertex) in self.vertices.iter_mut(){
             vertex.polygons.retain(|n| !polygons_to_rm.contains(n));
+        }
+
+    }
+
+
+
+    pub(crate) fn reorder_vertex_polygons(&mut self) {
+
+        let mut mapping_polygons: HashMap<usize, Vec<usize>> = HashMap::new();
+
+        for (vertex_id, vertex) in self.vertices.iter() {
+
+            // For each polygon using a vertex, sort them in CCW order
+            let mut v_polygons = vertex
+                .polygons
+                .iter()
+                .filter(|p| **p != usize::MAX)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            // Sort by the angle between the Y axis and the direction from the vertex to the center of the polygon
+            v_polygons.sort_unstable_by_key(|p| {
+                let center: Vec2 = self.polygon(p).center(&self).xz();
+                let direction = center - vertex.xz();
+                let angle = Vec2::Y.angle_to(direction); // for sure Y?
+                (angle * 100000.0) as i32
+            });
+
+            v_polygons.dedup_by_key(|p| *p);
+            if v_polygons.is_empty() {
+                v_polygons.push(usize::MAX);
+            } else {
+                // Reintroduce empty markers
+                // For two following polygons on a vertex, check their previous / next vertices
+                // If they are different, there is a hole between them
+
+                let first = v_polygons[0];
+                let last = *v_polygons.last().unwrap();
+                if first == last {
+                    v_polygons.push(usize::MAX);
+                } else {
+                    v_polygons = v_polygons
+                        .windows(2)
+                        .map(|pair| [pair[0], pair[1]])
+                        .chain(std::iter::once([last, first]))
+                        .flat_map(|[pair0, pair1]| {
+
+                            let mut polygon0 = self.polygon(&pair0).vertices.clone();
+                            polygon0.reverse();
+                            let mut found = false;
+                            let Some(previous0) =
+                                polygon0.iter().cycle().take(polygon0.len() * 2).find(|v| {
+                                    if found {
+                                        return true;
+                                    }
+                                    if self.vertex(v).loc.distance_squared(vertex.loc)< 0.0001 {
+                                        found = true;
+                                    }
+                                    false
+                                })
+                            else {
+                                return vec![pair0, usize::MAX];
+                            };
+                            let polygon1 = self.polygon(&pair1).vertices.clone();
+                            let mut found = false;
+                            let Some(next1) =
+                                polygon1.iter().cycle().take(polygon1.len() * 2).find(|v| {
+                                    if found {
+                                        return true;
+                                    }
+                                    if self.vertex(v).loc.distance_squared(vertex.loc)< 0.0001 {
+                                        found = true;
+                                    }
+                                    false
+                                })
+                            else {
+                                return vec![pair0, usize::MAX];
+                            };
+
+                            if self.vertex(previous0).loc != self.vertex(next1).loc {
+                                vec![pair0, usize::MAX]
+                            } else {
+                                vec![pair0]
+                            }
+                        })
+                        .collect();
+                }
+            }
+            mapping_polygons.insert(*vertex_id, v_polygons);
+        }
+
+        for (vertex_id, v_polygons) in mapping_polygons.iter(){
+            let vertex_data = self.vertices.get_mut(vertex_id).unwrap();
+            vertex_data.polygons = v_polygons.clone();
         }
 
     }

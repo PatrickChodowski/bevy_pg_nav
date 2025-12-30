@@ -1,5 +1,5 @@
-use bevy::log::{error_once, info, error};
-use bevy::prelude::{Vec2, Vec3Swizzles, Reflect, Entity};
+use bevy::log::info;
+use bevy::prelude::{Vec2, Reflect};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy::platform::collections::hash_map::Entry;
 use serde::{Serialize, Deserialize};
@@ -93,9 +93,9 @@ pub enum SearchStep {
 }
 
 pub struct PathFinder {
-    queue: BinaryHeap<Node>,
-    node_buffer: Vec<Node>,
-    root_history: HashMap<Root, f32>,
+    pub queue: BinaryHeap<Node>,
+    pub node_buffer: Vec<Node>,
+    pub root_history: HashMap<Root, f32>,
     // pub from: Vec2,
     pub to: Vec2,
     // pub polygon_from: usize,
@@ -107,10 +107,7 @@ pub struct PathFinder {
 impl PathFinder {
     #[allow(dead_code)]
     pub fn best(&self) -> Option<&Node> {
-        for n in self.queue.iter(){
-            return Some(n);
-        }
-        return None;
+        return self.queue.peek();
     }
 
     pub fn setup(
@@ -130,26 +127,12 @@ impl PathFinder {
         };
 
         let empty_node = Node::empty(from);
-        let starting_polygon: &&PGPolygon = &navmesh.polygon(&from.1).unwrap();
+        let starting_polygon: &&PGPolygon = &navmesh.polygon(&from.1);
 
         for edge in starting_polygon.edges_index() {
 
-            let start: &PGVertex = if let Some(v) = navmesh.vertex(&edge[0]) {
-                v
-            } else {
-                if DEBUG {
-                    info!(" [debug] cant find vertex {}", &edge[0]);
-                }
-                continue;
-            };
-            let end: &PGVertex = if let Some(v) = navmesh.vertex(&edge[1]) {
-                v
-            } else {
-                if DEBUG {
-                    info!(" [debug] cant find vertex {}", &edge[1]);
-                }
-                continue;
-            };
+            let start: &PGVertex = navmesh.vertex(&edge[0]);
+            let end: &PGVertex = navmesh.vertex(&edge[1]);
 
             let other_sides = start.common(&end, &from.1);
             if DEBUG {
@@ -290,8 +273,8 @@ impl PathFinder {
         loop {
             for successor in self.edges_between(&node).iter() {
                 let [successor_edge_0, successor_edge_1] = successor.edge;
-                let start: &PGVertex = self.navmesh.vertex(&successor_edge_0).unwrap();
-                let end: &PGVertex = self.navmesh.vertex(&successor_edge_1).unwrap();
+                let start: &PGVertex = self.navmesh.vertex(&successor_edge_0);
+                let end: &PGVertex = self.navmesh.vertex(&successor_edge_1);
                 let start_loc: Vec2 = start.xz();
                 let end_loc: Vec2 = end.xz();
                 let other_sides = start.common(&end, &node.polygon_to);
@@ -312,12 +295,7 @@ impl PathFinder {
 
                 for other_side in other_sides.iter(){
 
-                    let Some(other_side_polygon) = self.navmesh.polygon(other_side) else {
-                        if DEBUG {
-                            error!("cant find {} from other_side", other_side);
-                        }
-                        return;
-                    };
+                    let other_side_polygon = self.navmesh.polygon(other_side);
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
                     if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1{
@@ -375,6 +353,13 @@ impl PathFinder {
                         }
                     }
 
+
+                    // ZERO LENGTH EDGE
+                    if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
+                        continue;
+                    }
+
+
                     self.try_add_node(
                         root,
                         *other_side,
@@ -386,6 +371,8 @@ impl PathFinder {
             }
 
             if self.node_buffer.len() == 1 && self.node_buffer[0].polygon_to != self.polygon_to {
+
+                info!(" [debug] ONLY ONE node in node_buffer");
 
                 let previous_node = node;
                 node = self.node_buffer.drain(..).next().unwrap();
@@ -418,16 +405,16 @@ impl PathFinder {
     fn edges_between(&self, node: &Node) -> SmallVec<[Successor; 10]> {
         let mut successors = SmallVec::new();
 
-        let Some(polygon) = self.navmesh.polygon(&node.polygon_to) else {return successors;};
+        let polygon = self.navmesh.polygon(&node.polygon_to);
         let edge: Vec2 = self.navmesh.vertices[&node.edge.1].xz();
         let right_index: usize = polygon.vertices.iter().enumerate()
-            .find(|(_, v_index)| {self.navmesh.vertex(v_index).unwrap().xz().distance_squared(edge) < 0.001})
+            .find(|(_, v_index)| {self.navmesh.vertex(v_index).xz().distance_squared(edge) < 0.001})
             .map(|(i, _)| i)
             .unwrap_or_else(|| {
                     let mut distances = polygon
                         .vertices
                         .iter()
-                        .map(|v_index| {(self.navmesh.vertex(v_index).unwrap().xz()).distance_squared(edge)})
+                        .map(|v_index| {(self.navmesh.vertex(v_index).xz()).distance_squared(edge)})
                         .enumerate()
                         .collect::<Vec<_>>();
                     distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -439,13 +426,9 @@ impl PathFinder {
 
         for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
 
-            let Some(start) = self.navmesh.vertex(&edge0) else {error_once!("Lack of vertex for {}", &edge[0]); continue}; // TODO: changed to error_once but there will be more
-            let Some(end)  = self.navmesh.vertex(&edge1) else {error_once!("Lack of vertex for {}", &edge[1]); continue};
-
-            let mut start_point = start.xz();
-            let end_point = end.xz();
+            let mut start_point = self.navmesh.vertex(&edge0).xz();
+            let end_point  = self.navmesh.vertex(&edge1).xz();
             let edge_side = start_point.side((node.root, node.interval.0));
-
 
             match edge_side{
                 EdgeSide::Right => {
