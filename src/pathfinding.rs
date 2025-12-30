@@ -13,7 +13,7 @@ use std::fmt;
 use std::collections::BinaryHeap;
 use crate::types::{PGNavmesh, PGPolygon, PGVertex};
 
-pub(crate) const DEBUG: bool = true;
+pub(crate) const DEBUG: bool = false;
 
 const PRECISION: f32 = 1000.0;
 const EPSILON: f32 = 1e-4;
