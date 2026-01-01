@@ -195,8 +195,11 @@ impl PGPolygon {
     }
 
 
-    fn closest_point(&self, p: Vec3, pgn: &PGNavmesh) -> Vec3 {
-        let [a, b, c] = self.locs(pgn);
+    fn closest_point(&self, p: Vec2, pgn: &PGNavmesh) -> Vec2 {
+        let [a3, b3, c3] = self.locs(pgn);
+        let a = a3.xz();
+        let b = b3.xz();
+        let c = c3.xz();
                 
         // Check if P in vertex region outside A
         let ab = b - a;
@@ -374,26 +377,54 @@ impl PGNavmesh {
     pub fn path_points(
         &self, 
         from:     Vec2, 
-        to:       Vec2,
+        to0:       Vec2,
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
+
+        info!("path points");
+
+        let mut to = to0;
+
         let Some(starting_polygon) = self.has_point(from) else {
-            if DEBUG {
+            // if DEBUG {
                 info!("no starting polygon index");
-            }
+            // }
             return None;
         };
-        let Some(ending_polygon) = self.has_point(to) else {
-            if DEBUG {
+
+        let mut maybe_ending_polygon: Option<&PGPolygon> = self.has_point(to);
+        if maybe_ending_polygon.is_none() {
+            // if DEBUG {
+                info!("no ending polygon index for point, searching for nearest one");
+            // }
+
+            if let Some((new_target, new_target_polygon_id)) = self.find_nearest_point_from(from, to){
+                // if DEBUG {
+                    info!("Found nearest one: {} ({})", new_target, new_target_polygon_id);
+                // }
+
+                to = new_target;
+                maybe_ending_polygon = Some(self.polygon(&new_target_polygon_id));
+            } else {
+                // if DEBUG {
+                    info!("couldnt find the nearest one to {}", to);
+                // }
+            }
+        }
+
+        let Some(ending_polygon) = maybe_ending_polygon else {
+            // if DEBUG {
                 info!("no ending polygon index");
-            }
+            // }
             return None;
         };
-        if DEBUG {
+
+
+        // if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
             info!(" start polygon: {:?}", starting_polygon);
             info!(" end polygon: {:?}", ending_polygon);
-        }
+        // }
 
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
@@ -684,13 +715,14 @@ impl PGNavmesh {
 
 
 
-    pub fn find_nearest_point_from(&self, origin: Vec3, target: Vec3) -> Option<Vec3> {
+    pub fn find_nearest_point_from(&self, origin: Vec2, target: Vec2) -> Option<(Vec2, usize)> {
 
-        let start_polygon = self.has_point(origin.xz()).unwrap();
+        let start_polygon = self.has_point(origin).unwrap();
         let mut visited: HashSet<usize> = HashSet::new();
         let mut to_visit: Vec<usize> = vec![start_polygon.index];
-        let mut best_point: Option<Vec3> = None;
+        let mut best_point: Option<Vec2> = None;
         let mut best_dist = f32::INFINITY;
+        let mut best_polygon_id = start_polygon.index;
 
         while let Some(poly_id) = to_visit.pop() {
 
@@ -706,6 +738,7 @@ impl PGNavmesh {
             if dist < best_dist {
                 best_dist = dist;
                 best_point = Some(closest);
+                best_polygon_id = poly_id;
             }
 
             for neighbor_id in polygon.neighbours.iter(){
@@ -715,6 +748,6 @@ impl PGNavmesh {
             }
         }
 
-        return best_point;
+        return best_point.map(|p| (p, best_polygon_id));
     }
 }
