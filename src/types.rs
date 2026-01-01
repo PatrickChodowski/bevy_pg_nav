@@ -194,7 +194,66 @@ impl PGPolygon {
         }
     }
 
+
+    fn closest_point(&self, p: Vec3, pgn: &PGNavmesh) -> Vec3 {
+        let [a, b, c] = self.locs(pgn);
+                
+        // Check if P in vertex region outside A
+        let ab = b - a;
+        let ac = c - a;
+        let ap = p - a;
+        let d1 = ab.dot(ap);
+        let d2 = ac.dot(ap);
+        if d1 <= 0.0 && d2 <= 0.0 {
+            return a;
+        }
+        
+        // Check if P in vertex region outside B
+        let bp = p - b;
+        let d3 = ab.dot(bp);
+        let d4 = ac.dot(bp);
+        if d3 >= 0.0 && d4 <= d3 {
+            return b;
+        }
+        
+        // Check if P in edge region of AB
+        let vc = d1 * d4 - d3 * d2;
+        if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+            let v = d1 / (d1 - d3);
+            return a + ab * v;
+        }
+        
+        // Check if P in vertex region outside C
+        let cp = p - c;
+        let d5 = ab.dot(cp);
+        let d6 = ac.dot(cp);
+        if d6 >= 0.0 && d5 <= d6 {
+            return c;
+        }
+        
+        // Check if P in edge region of AC
+        let vb = d5 * d2 - d1 * d6;
+        if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+            let w = d2 / (d2 - d6);
+            return a + ac * w;
+        }
+        
+        // Check if P in edge region of BC
+        let va = d3 * d6 - d5 * d4;
+        if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+            let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+            return b + (c - b) * w;
+        }
+        
+        // P inside face region
+        let denom = 1.0 / (va + vb + vc);
+        let v = vb * denom;
+        let w = vc * denom;
+        a + ab * v + ac * w
+    }
 }
+
+
 
 #[inline(always)]
 fn _cross(a: Vec2, b: Vec2) -> f32 {
@@ -484,8 +543,6 @@ impl PGNavmesh {
 
     }
 
-
-
     pub(crate) fn reorder_vertex_polygons(&mut self) {
 
         let mut mapping_polygons: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -578,8 +635,6 @@ impl PGNavmesh {
 
     }
 
-
-
     pub fn ray_side_intersection(
         &self, 
         origin: Vec3, 
@@ -625,5 +680,41 @@ impl PGNavmesh {
 
         }
         return (false, 0.0);
+    }
+
+
+
+    pub fn find_nearest_point_from(&self, origin: Vec3, target: Vec3) -> Option<Vec3> {
+
+        let start_polygon = self.has_point(origin.xz()).unwrap();
+        let mut visited: HashSet<usize> = HashSet::new();
+        let mut to_visit: Vec<usize> = vec![start_polygon.index];
+        let mut best_point: Option<Vec3> = None;
+        let mut best_dist = f32::INFINITY;
+
+        while let Some(poly_id) = to_visit.pop() {
+
+            if visited.contains(&poly_id) {
+                continue;
+            }
+
+            visited.insert(poly_id);
+            let polygon = self.polygon(&poly_id);
+            let closest = polygon.closest_point(target, &self);
+            let dist = closest.distance_squared(target);
+            
+            if dist < best_dist {
+                best_dist = dist;
+                best_point = Some(closest);
+            }
+
+            for neighbor_id in polygon.neighbours.iter(){
+                if !visited.contains(neighbor_id) {
+                    to_visit.push(*neighbor_id);
+                }    
+            }
+        }
+
+        return best_point;
     }
 }
