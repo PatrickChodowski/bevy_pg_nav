@@ -146,8 +146,27 @@ impl PGPolygon {
         let c = c3.xz();
         return [(a,b),(b,c),(c,a)];
     }
+    
+    pub fn circular_edges_index(
+        &self,
+        bounds: RangeInclusive<usize>,
+    ) -> impl Iterator<Item = [usize; 2]> + '_ {
+        self.edges_index()
+            .chain(self.edges_index())
+            .skip(*bounds.start())
+            .take(*bounds.end() + 1 - *bounds.start())
+    }
+    pub fn edges_index(&self) -> impl Iterator<Item = [usize; 2]> + '_ {
+        self.vertices
+            .windows(2)
+            .map(|pair| [pair[0], pair[1]])
+            .chain(std::iter::once([
+                self.vertices[self.vertices.len() - 1],
+                self.vertices[0],
+        ]))
+    }
 
-    pub fn ray_side_intersection(
+    fn ray_side_intersection(
         &self, 
         origin: Vec3, 
         direction: Vec3, 
@@ -174,25 +193,7 @@ impl PGPolygon {
             }
         }
     }
-    
-    pub fn circular_edges_index(
-        &self,
-        bounds: RangeInclusive<usize>,
-    ) -> impl Iterator<Item = [usize; 2]> + '_ {
-        self.edges_index()
-            .chain(self.edges_index())
-            .skip(*bounds.start())
-            .take(*bounds.end() + 1 - *bounds.start())
-    }
-    pub fn edges_index(&self) -> impl Iterator<Item = [usize; 2]> + '_ {
-        self.vertices
-            .windows(2)
-            .map(|pair| [pair[0], pair[1]])
-            .chain(std::iter::once([
-                self.vertices[self.vertices.len() - 1],
-                self.vertices[0],
-        ]))
-    }
+
 }
 
 #[inline(always)]
@@ -390,7 +391,6 @@ impl PGNavmesh {
         return self.polygons.get(id).expect(&format!("expected polygon {}", id));
     }
 
-
     pub fn cleanup_lower(&mut self){
 
         if self.typ != PGNavmeshType::Terrain {
@@ -578,4 +578,52 @@ impl PGNavmesh {
 
     }
 
+
+
+    pub fn ray_side_intersection(
+        &self, 
+        origin: Vec3, 
+        direction: Vec3, 
+        len: f32,
+        origin_polygon: usize,
+    )  -> (bool, f32) {
+
+        let mut polys_to_check: Vec<&usize> = Vec::with_capacity(10);
+        let mut polys_buffer: Vec<&usize> = Vec::with_capacity(10);
+
+        let safety: usize = 5;
+        let mut i: usize = 0;
+
+        let Some(origin_poly) = self.polygons.get(&origin_polygon) else {return (false, 0.0);};
+        polys_to_check.extend(origin_poly.neighbours.iter());
+
+        while i < safety {
+ 
+            for poly_id in polys_to_check.iter(){
+                let Some(poly) = self.polygons.get(*poly_id) else {continue};
+                let (intersections, min_dist) = poly.ray_side_intersection(origin, direction, len, &self);
+                let blocker: bool = poly_id == &&usize::MAX;
+
+                match (intersections, blocker) {
+                    (0, _) => {continue; /* Wrong side */}
+                    (1, false) => {return (false, len); /* Reached end of the ray, no blockers*/}
+                    (_, true) => {return (true, min_dist); /* Reached end of the ray, its a blocker*/}
+                    (2, false) => {
+                        // Clear polys to check
+                        // Break loop, clear polys_to_check, add current neighbours of current poly to check
+                        polys_buffer.extend(poly.neighbours.iter());
+                        break;
+                    }
+                    (_,_) => {panic!("Should not happen never");}
+                }
+
+            }
+            polys_to_check.clear();
+            polys_to_check.extend(polys_buffer.iter());
+            polys_buffer.clear();
+            i += 1;
+
+        }
+        return (false, 0.0);
+    }
 }

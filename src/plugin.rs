@@ -8,7 +8,7 @@ use bevy::{input::common_conditions::input_just_pressed, prelude::*};
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy_rerecast::{debug::DetailNavmeshGizmo, prelude::*};
 use bevy_rerecast::Mesh3dBackendPlugin;
-use bevy_pg_core::prelude::TerrainChunk;
+use bevy_pg_core::prelude::{TerrainChunk, GameState};
 
 use crate::debug::PGNavDebugPlugin;
 use crate::water::{
@@ -43,9 +43,21 @@ impl Plugin for PGNavPlugin {
         .add_observer(on_water_navmesh_sources_ready)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
+        .add_systems(OnExit(GameState::Play), clear)
         ;
     }
 }
+
+fn clear(
+    mut commands: Commands,
+    navs:         Query<Entity, With<PGNavmesh>>
+){
+    for entity in navs.iter(){
+        commands.entity(entity).despawn();
+    }
+
+}
+
 
 pub(crate) const ORIGIN_HEIGHT: f32 = 1000.0;
 
