@@ -196,11 +196,16 @@ impl PGPolygon {
 
 
     fn closest_point(&self, p: Vec2, pgn: &PGNavmesh) -> Vec2 {
+
+        const EPSILON: f32 = 5.0;
         let [a3, b3, c3] = self.locs(pgn);
         let a = a3.xz();
         let b = b3.xz();
         let c = c3.xz();
                 
+        // Calculate triangle center for offsetting
+        let center = (a + b + c) / 3.0;
+        
         // Check if P in vertex region outside A
         let ab = b - a;
         let ac = c - a;
@@ -208,7 +213,7 @@ impl PGPolygon {
         let d1 = ab.dot(ap);
         let d2 = ac.dot(ap);
         if d1 <= 0.0 && d2 <= 0.0 {
-            return a;
+            return a + (center - a).normalize() * EPSILON;
         }
         
         // Check if P in vertex region outside B
@@ -216,14 +221,15 @@ impl PGPolygon {
         let d3 = ab.dot(bp);
         let d4 = ac.dot(bp);
         if d3 >= 0.0 && d4 <= d3 {
-            return b;
+            return b + (center - b).normalize() * EPSILON;
         }
         
         // Check if P in edge region of AB
         let vc = d1 * d4 - d3 * d2;
         if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
             let v = d1 / (d1 - d3);
-            return a + ab * v;
+            let edge_point = a + ab * v;
+            return edge_point + (center - edge_point).normalize() * EPSILON;
         }
         
         // Check if P in vertex region outside C
@@ -231,24 +237,26 @@ impl PGPolygon {
         let d5 = ab.dot(cp);
         let d6 = ac.dot(cp);
         if d6 >= 0.0 && d5 <= d6 {
-            return c;
+            return c + (center - c).normalize() * EPSILON;
         }
         
         // Check if P in edge region of AC
         let vb = d5 * d2 - d1 * d6;
         if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
             let w = d2 / (d2 - d6);
-            return a + ac * w;
+            let edge_point = a + ac * w;
+            return edge_point + (center - edge_point).normalize() * EPSILON;
         }
         
         // Check if P in edge region of BC
         let va = d3 * d6 - d5 * d4;
         if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
             let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-            return b + (c - b) * w;
+            let edge_point = b + (c - b) * w;
+            return edge_point + (center - edge_point).normalize() * EPSILON;
         }
         
-        // P inside face region
+        // P inside face region - use barycentric coordinates (no offset needed)
         let denom = 1.0 / (va + vb + vc);
         let v = vb * denom;
         let w = vc * denom;
@@ -376,14 +384,23 @@ impl PGNavmesh {
 
     pub fn path_points(
         &self, 
-        from:     Vec2, 
+        from0:     Vec2, 
         to0:       Vec2,
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
 
+        let mut from = from0;
         let mut to = to0;
 
-        let Some(starting_polygon) = self.has_point(from) else {
+        let mut maybe_starting_polygon: Option<&PGPolygon> = self.has_point(from);
+        if maybe_starting_polygon.is_none() {
+            if let Some((new_start, new_start_polygon_id)) = self.find_nearest_point_from_outside(from){
+                from = new_start;
+                maybe_starting_polygon = Some(self.polygon(&new_start_polygon_id));
+            }
+        }
+
+        let Some(starting_polygon) = maybe_starting_polygon else {
             if DEBUG {
                 info!("no starting polygon index");
             }
@@ -400,7 +417,6 @@ impl PGNavmesh {
                 if DEBUG {
                     info!("Found nearest one: {} ({})", new_target, new_target_polygon_id);
                 }
-
                 to = new_target;
                 maybe_ending_polygon = Some(self.polygon(&new_target_polygon_id));
             } else {
@@ -420,8 +436,8 @@ impl PGNavmesh {
 
         if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
-            info!(" start polygon: {:?}", starting_polygon);
-            info!(" end polygon: {:?}", ending_polygon);
+            // info!(" start polygon: {:?}", starting_polygon);
+            // info!(" end polygon: {:?}", ending_polygon);
         }
 
         if starting_polygon.index == ending_polygon.index {
@@ -776,6 +792,24 @@ impl PGNavmesh {
         return (false, 0.0);
     }
 
+    pub fn find_nearest_point_from_outside(&self, origin: Vec2) -> Option<(Vec2, usize)> {
+        let mut best_point = None;
+        let mut best_dist_sq = f32::INFINITY;
+        let mut best_polygon_id = 0;
+        
+        for (&poly_id, polygon) in self.polygons.iter() {
+            let closest = polygon.closest_point(origin, &self);
+            let dist_sq = closest.distance_squared(origin);
+            
+            if dist_sq < best_dist_sq {
+                best_dist_sq = dist_sq;
+                best_point = Some(closest);
+                best_polygon_id = poly_id;
+            }
+        }
+        
+        best_point.map(|p| (p, best_polygon_id))
+    }
 
 
     pub fn find_nearest_point_from(&self, origin: Vec2, target: Vec2) -> Option<(Vec2, usize)> {
