@@ -99,7 +99,7 @@ impl PGPolygon {
         origin:    &Vec3, 
         direction: &Vec3,
         pgn:       &PGNavmesh
-    ) -> Option<(Vec3, f32)> {
+    ) -> Option<Vec3> {
 
         const EPSILON: f32 = 0.0000001;
         let [a,b,c] = self.locs(pgn);
@@ -133,7 +133,7 @@ impl PGPolygon {
         
         if t > EPSILON {
             let intersection_point = origin + direction * t;
-            return Some((intersection_point, t));
+            return Some(intersection_point);
         } else {
             return None;
         }
@@ -348,10 +348,8 @@ impl PGNavmesh {
             let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
             let direction = Vec3::NEG_Y;
 
-            if let Some((_world_pos, dist)) = poly.ray_intersection(&origin, &direction, &self){
-                let dist = dist.round() as i32;
-                let height: i32 = ORIGIN_HEIGHT as i32 - dist;
-                return Some((poly, height as f32));
+            if let Some(world_pos) = poly.ray_intersection(&origin, &direction, &self){
+                return Some((poly, world_pos.y as f32 - 1.75));
             } else {
                 // TODO solve this
                 warn!("Navmesh ray calculation went wrong for {} and {:?}", poly.index, origin);
@@ -361,12 +359,11 @@ impl PGNavmesh {
         return None;
     }
 
-    pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(Vec3, f32, usize)>  {
+    pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(Vec3, usize)>  {
         let direction = direction.normalize();
-        // info!("direction: {:?}", direction);
         for (polygon_index, polygon) in self.polygons.iter(){
-            if let Some((world_pos, _dist)) = polygon.ray_intersection(&origin, &direction, &self){
-                return Some((world_pos, _dist, *polygon_index));
+            if let Some(world_pos) = polygon.ray_intersection(&origin, &direction, &self){
+                return Some((world_pos, *polygon_index));
             }
         }
         return None;
