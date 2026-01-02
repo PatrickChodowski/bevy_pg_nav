@@ -34,7 +34,7 @@ impl Plugin for PGNavPlugin {
         .init_asset::<PGNavmesh>()
         .add_message::<GenerateNavMesh>()
         .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["navmesh.json"]))
-        // .add_plugins(PGNavDebugPlugin)
+        .add_plugins(PGNavDebugPlugin)
         .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
 
@@ -426,6 +426,8 @@ fn on_ready_navmesh(
 
                 pgn.cleanup_lower();
                 pgn.reorder_vertex_polygons();
+                pgn.islands_removal();
+                
                 commands.spawn(pgn.clone());
 
                 if navconfig.serialize {

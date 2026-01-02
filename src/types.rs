@@ -481,7 +481,72 @@ impl PGNavmesh {
         return self.polygons.get(id).expect(&format!("expected polygon {}", id));
     }
 
-    pub fn cleanup_lower(&mut self){
+    pub (crate) fn islands_removal(&mut self){
+        let mut visited: HashSet<usize> = HashSet::new();
+        let mut islands: Vec<Vec<usize>> = Vec::new();
+
+        for (polygon_id, _polygon) in self.polygons.iter(){
+
+            if visited.contains(polygon_id){
+                continue;
+            }
+
+            let mut island: Vec<usize> = Vec::new();
+            let mut queue: Vec<usize> = vec![*polygon_id];
+
+            while queue.len() > 0 {
+
+                let current = queue.pop().unwrap(); // checked in while condition
+                if visited.contains(&current) {
+                    continue;
+                }
+                visited.insert(current);
+                island.push(current);
+
+                for n_poly_id in self.polygon(&current).neighbours.iter(){
+                    if n_poly_id == &usize::MAX {
+                        continue;
+                    }
+                    if visited.contains(n_poly_id){
+                        continue;
+                    }
+                    queue.push(*n_poly_id);
+                }
+
+            }
+            islands.push(island);
+
+        }
+
+        // Remove small islands
+        let mut polygons_to_rm: Vec<usize> = Vec::new();
+        let mut vertices_to_rm: Vec<usize> = Vec::new();
+
+        const ISLAND_THRESHOLD: usize = 10;
+        for island in islands.iter_mut(){
+            if island.len() <= ISLAND_THRESHOLD {
+                for poly_id in island.iter(){
+                    vertices_to_rm.extend(self.polygon(poly_id).vertices.iter());
+                }
+                polygons_to_rm.extend(island.drain(..)); 
+            }
+        }
+
+        for polygon_id in polygons_to_rm.iter(){
+            self.polygons.remove(polygon_id);
+        }
+
+        for vertex_id in vertices_to_rm.iter(){
+            self.vertices.remove(vertex_id);
+        }
+
+    }
+
+
+
+
+
+    pub(crate) fn cleanup_lower(&mut self){
 
         if self.typ != PGNavmeshType::Terrain {
             return;
