@@ -381,50 +381,48 @@ impl PGNavmesh {
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
 
-        info!("path points");
-
         let mut to = to0;
 
         let Some(starting_polygon) = self.has_point(from) else {
-            // if DEBUG {
+            if DEBUG {
                 info!("no starting polygon index");
-            // }
+            }
             return None;
         };
 
         let mut maybe_ending_polygon: Option<&PGPolygon> = self.has_point(to);
         if maybe_ending_polygon.is_none() {
-            // if DEBUG {
+            if DEBUG {
                 info!("no ending polygon index for point, searching for nearest one");
-            // }
+            }
 
             if let Some((new_target, new_target_polygon_id)) = self.find_nearest_point_from(from, to){
-                // if DEBUG {
+                if DEBUG {
                     info!("Found nearest one: {} ({})", new_target, new_target_polygon_id);
-                // }
+                }
 
                 to = new_target;
                 maybe_ending_polygon = Some(self.polygon(&new_target_polygon_id));
             } else {
-                // if DEBUG {
+                if DEBUG {
                     info!("couldnt find the nearest one to {}", to);
-                // }
+                }
             }
         }
 
         let Some(ending_polygon) = maybe_ending_polygon else {
-            // if DEBUG {
+            if DEBUG {
                 info!("no ending polygon index");
-            // }
+            }
             return None;
         };
 
 
-        // if DEBUG {
+        if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
             info!(" start polygon: {:?}", starting_polygon);
             info!(" end polygon: {:?}", ending_polygon);
-        // }
+        }
 
         if starting_polygon.index == ending_polygon.index {
             let path = Path {
