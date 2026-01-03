@@ -404,51 +404,10 @@ impl PGNavmesh {
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
 
-        let mut from = *from0;
-        let mut to = *to0;
-
-        let mut maybe_starting_polygon: Option<&PGPolygon> = self.has_point(&from).map(|p| p.0);
-
-        if maybe_starting_polygon.is_none() {
-            if let Some((new_start, new_start_polygon_id)) = self.find_nearest_point_from_outside(&from){
-                from = new_start;
-                maybe_starting_polygon = Some(self.polygon(&new_start_polygon_id));
-            }
-        }
-
-        let Some(starting_polygon) = maybe_starting_polygon else {
-            if DEBUG {
-                info!("no starting polygon index");
-            }
-            return None;
-        };
-
-        let mut maybe_ending_polygon: Option<&PGPolygon> = self.has_point(&to).map(|p| p.0);
-        if maybe_ending_polygon.is_none() {
-            if DEBUG {
-                info!("no ending polygon index for point, searching for nearest one");
-            }
-
-            if let Some((new_target, new_target_polygon_id)) = self.find_nearest_point_from(&from, &to){
-                if DEBUG {
-                    info!("Found nearest one: {} ({})", new_target, new_target_polygon_id);
-                }
-                to = new_target;
-                maybe_ending_polygon = Some(self.polygon(&new_target_polygon_id));
-            } else {
-                if DEBUG {
-                    info!("couldnt find the nearest one to {}", to);
-                }
-            }
-        }
-
-        let Some(ending_polygon) = maybe_ending_polygon else {
-            if DEBUG {
-                info!("no ending polygon index");
-            }
-            return None;
-        };
-
+        let from = *from0;
+        let to = *to0;
+        let starting_polygon: &PGPolygon = self.has_point(&from).map(|p| p.0).unwrap();
+        let ending_polygon: &PGPolygon = self.has_point(&to).map(|p| p.0).unwrap();
 
         if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
