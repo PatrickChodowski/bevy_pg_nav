@@ -300,24 +300,27 @@ fn _line_segments_intersect(
 }
 
 // Search for the point in query of navmeshes
-pub fn find_point<'a>(point: &Vec2, navs: &'a Query<(Entity, &'a PGNavmesh)>) -> Option<(Entity, &'a PGNavmesh)> {
+pub fn find_point<'a>(point: &Vec2, navs: &Query<(Entity, &PGNavmesh)>) -> Option<Entity> {
 
     let mut highest_nav_entity: Option<Entity> = None;
     let mut highest_world_pos: Vec3 = Vec3::MIN;
-    let mut highest_navmesh: Option<&PGNavmesh> = None;
+    // let mut highest_navmesh: Option<&PGNavmesh> = None;
 
     for (navmesh_entity, navmesh) in navs.iter(){
         if let Some((_polygon, world_pos)) = navmesh.has_point(point){
             if world_pos.y > highest_world_pos.y {
                 highest_world_pos = world_pos;
                 highest_nav_entity = Some(navmesh_entity);
-                highest_navmesh = Some(navmesh);
+                // highest_navmesh = Some(navmesh);
             }
         }
     }
 
     if let Some(nav_entity) = highest_nav_entity {
-        return Some((nav_entity, highest_navmesh.unwrap()));
+        return Some(
+            nav_entity, 
+            // highest_navmesh.unwrap()
+        );
     }
 
     return None;
