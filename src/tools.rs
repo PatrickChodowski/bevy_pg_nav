@@ -1,4 +1,4 @@
-use bevy::prelude::{Vec2, Vec3A, Vec3};
+use bevy::prelude::{Vec3A, Vec3};
 use bevy::math::Ray3d;
 use std::f32::EPSILON;
 

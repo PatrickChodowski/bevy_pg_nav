@@ -101,7 +101,7 @@ fn display_pointer(
 
         let mut pointer_polygon_id: Option<usize> = None;
         if let Some(world_pos) = pointer.world_pos {
-            if let Some(pointer_polygon) = pgn.has_point(world_pos.xz()){
+            if let Some((pointer_polygon, _world_pos)) = pgn.has_point(&world_pos.xz()){
                 pointer_polygon_id = Some(pointer_polygon.index);
             }
         }

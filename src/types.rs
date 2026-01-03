@@ -195,7 +195,7 @@ impl PGPolygon {
     }
 
 
-    fn closest_point(&self, p: Vec2, pgn: &PGNavmesh) -> Vec2 {
+    fn closest_point(&self, p: &Vec2, pgn: &PGNavmesh) -> Vec2 {
 
         const EPSILON: f32 = 5.0;
         let [a3, b3, c3] = self.locs(pgn);
@@ -299,6 +299,31 @@ fn _line_segments_intersect(
     }
 }
 
+// Search for the point in query of navmeshes
+pub fn find_point<'a>(point: &Vec2, navs: &'a Query<(Entity, &'a PGNavmesh)>) -> Option<(Entity, &'a PGNavmesh)> {
+
+    let mut highest_nav_entity: Option<Entity> = None;
+    let mut highest_world_pos: Vec3 = Vec3::MIN;
+    let mut highest_navmesh: Option<&PGNavmesh> = None;
+
+    for (navmesh_entity, navmesh) in navs.iter(){
+        if let Some((_polygon, world_pos)) = navmesh.has_point(point){
+            if world_pos.y > highest_world_pos.y {
+                highest_world_pos = world_pos;
+                highest_nav_entity = Some(navmesh_entity);
+                highest_navmesh = Some(navmesh);
+            }
+        }
+    }
+
+    if let Some(nav_entity) = highest_nav_entity {
+        return Some((nav_entity, highest_navmesh.unwrap()));
+    }
+
+    return None;
+}
+
+
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
@@ -341,21 +366,11 @@ impl PGNavmesh {
 
     pub fn get_polygon_height(
         &self, 
-        loc:          Vec2
+        loc:          &Vec2
     ) -> Option<(&PGPolygon, f32)> {
-
-        if let Some(poly) = self.has_point(loc){
-            let origin = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
-            let direction = Vec3::NEG_Y;
-
-            if let Some(world_pos) = poly.ray_intersection(&origin, &direction, &self){
-                return Some((poly, world_pos.y as f32 - 1.75));
-            } else {
-                // TODO solve this
-                warn!("Navmesh ray calculation went wrong for {} and {:?}", poly.index, origin);
-            }
+        if let Some((poly, world_pos)) = self.has_point(loc){
+            return Some((poly, world_pos.y as f32 - 1.75));
         }
-
         return None;
     }
 
@@ -369,11 +384,11 @@ impl PGNavmesh {
         return None;
     }
 
-    pub fn has_point(&self, loc: Vec2) -> Option<&PGPolygon> {
+    pub fn has_point(&self, loc: &Vec2) -> Option<(&PGPolygon, Vec3)> {
         let origin: Vec3 = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
         for (_polygon_id, polygon) in self.polygons.iter(){
-            if polygon.ray_intersection(&origin, &Vec3::NEG_Y, &self).is_some(){
-                return Some(polygon);
+            if let Some(world_pos) = polygon.ray_intersection(&origin, &Vec3::NEG_Y, &self){
+                return Some((polygon, world_pos));
             }
         }
         return None;
@@ -381,17 +396,18 @@ impl PGNavmesh {
 
     pub fn path_points(
         &self, 
-        from0:     Vec2, 
-        to0:       Vec2,
+        from0:        &Vec2, 
+        to0:          &Vec2,
         agent_radius: f32
     ) -> Option<(Path, usize, usize)> {
 
-        let mut from = from0;
-        let mut to = to0;
+        let mut from = *from0;
+        let mut to = *to0;
 
-        let mut maybe_starting_polygon: Option<&PGPolygon> = self.has_point(from);
+        let mut maybe_starting_polygon: Option<&PGPolygon> = self.has_point(&from).map(|p| p.0);
+
         if maybe_starting_polygon.is_none() {
-            if let Some((new_start, new_start_polygon_id)) = self.find_nearest_point_from_outside(from){
+            if let Some((new_start, new_start_polygon_id)) = self.find_nearest_point_from_outside(&from){
                 from = new_start;
                 maybe_starting_polygon = Some(self.polygon(&new_start_polygon_id));
             }
@@ -404,13 +420,13 @@ impl PGNavmesh {
             return None;
         };
 
-        let mut maybe_ending_polygon: Option<&PGPolygon> = self.has_point(to);
+        let mut maybe_ending_polygon: Option<&PGPolygon> = self.has_point(&to).map(|p| p.0);
         if maybe_ending_polygon.is_none() {
             if DEBUG {
                 info!("no ending polygon index for point, searching for nearest one");
             }
 
-            if let Some((new_target, new_target_polygon_id)) = self.find_nearest_point_from(from, to){
+            if let Some((new_target, new_target_polygon_id)) = self.find_nearest_point_from(&from, &to){
                 if DEBUG {
                     info!("Found nearest one: {} ({})", new_target, new_target_polygon_id);
                 }
@@ -552,10 +568,6 @@ impl PGNavmesh {
         }
 
     }
-
-
-
-
 
     pub(crate) fn cleanup_lower(&mut self){
 
@@ -789,14 +801,14 @@ impl PGNavmesh {
         return (false, 0.0);
     }
 
-    pub fn find_nearest_point_from_outside(&self, origin: Vec2) -> Option<(Vec2, usize)> {
+    pub fn find_nearest_point_from_outside(&self, origin: &Vec2) -> Option<(Vec2, usize)> {
         let mut best_point = None;
         let mut best_dist_sq = f32::INFINITY;
         let mut best_polygon_id = 0;
         
         for (&poly_id, polygon) in self.polygons.iter() {
             let closest = polygon.closest_point(origin, &self);
-            let dist_sq = closest.distance_squared(origin);
+            let dist_sq = closest.distance_squared(*origin);
             
             if dist_sq < best_dist_sq {
                 best_dist_sq = dist_sq;
@@ -809,9 +821,9 @@ impl PGNavmesh {
     }
 
 
-    pub fn find_nearest_point_from(&self, origin: Vec2, target: Vec2) -> Option<(Vec2, usize)> {
+    pub fn find_nearest_point_from(&self, origin: &Vec2, target: &Vec2) -> Option<(Vec2, usize)> {
 
-        let start_polygon = self.has_point(origin).unwrap();
+        let (start_polygon, _world_pos) = self.has_point(origin).unwrap();
         let mut visited: HashSet<usize> = HashSet::new();
         let mut to_visit: Vec<usize> = vec![start_polygon.index];
         let mut best_point: Option<Vec2> = None;
@@ -827,7 +839,7 @@ impl PGNavmesh {
             visited.insert(poly_id);
             let polygon = self.polygon(&poly_id);
             let closest = polygon.closest_point(target, &self);
-            let dist = closest.distance_squared(target);
+            let dist = closest.distance_squared(*target);
             
             if dist < best_dist {
                 best_dist = dist;
