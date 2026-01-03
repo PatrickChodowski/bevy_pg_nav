@@ -28,6 +28,11 @@ impl Path {
         return self.path.len();
     }
 
+    pub fn add(&mut self, other: &mut Path){
+        self.length += other.length;
+        self.path.extend(other.path.drain(..));
+    }
+
     pub fn offset_inward(
         &self, 
         start_point: Vec2, 
