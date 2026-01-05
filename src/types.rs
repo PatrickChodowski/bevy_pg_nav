@@ -43,50 +43,21 @@ pub struct PGPolygon {
 }
 
 impl PGPolygon {
-    pub fn has_point(
-        &self, 
-        loc: &Vec2,
-        pgn: &PGNavmesh
-    ) -> bool {
-        const EPSILON: f32 = 0.0000001;
-
-        let a = pgn.vertex(&self.vertices[0]).xz();
-        let b = pgn.vertex(&self.vertices[1]).xz();
-        let c = pgn.vertex(&self.vertices[2]).xz();
-
-        // Calculate barycentric coordinates
-        let v0x = c.x - a.x;
-        let v0y = c.y - a.y;
-        let v1x = b.x - a.x;
-        let v1y = b.y - a.y;
-        let v2x = loc.x - a.x;
-        let v2y = loc.y - a.y;
-        
-        let dot00 = v0x * v0x + v0y * v0y;
-        let dot01 = v0x * v1x + v0y * v1y;
-        let dot02 = v0x * v2x + v0y * v2y;
-        let dot11 = v1x * v1x + v1y * v1y;
-        let dot12 = v1x * v2x + v1y * v2y;
-        
-        let denom = dot00 * dot11 - dot01 * dot01;
-        if denom.abs() < EPSILON {
-            return false; // Degenerate triangle
-        }
-        
-        let inv_denom = 1.0 / denom;
-        let u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
-        let v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
-    
-        // Check if point is in triangle
-        return u >= 0.0 && v >= 0.0 && (u + v) <= 1.0;
-    }
-
     pub fn locs(&self, pgn: &PGNavmesh) -> [Vec3; 3] {
         let a: Vec3 = pgn.vertex(&self.vertices[0]).loc;
         let b: Vec3 = pgn.vertex(&self.vertices[1]).loc;
         let c: Vec3 = pgn.vertex(&self.vertices[2]).loc;
         return [a,b,c];
     }
+
+    pub fn locs_2d(&self, pgn: &PGNavmesh) -> [Vec2;3]{
+        let [a3,b3,c3] = self.locs(pgn);
+        let a = a3.xz();
+        let b = b3.xz();
+        let c = c3.xz();
+        return [a,b,c];
+    }
+    
 
     pub fn center(&self, pgn: &PGNavmesh) -> Vec3 {
         let [a,b,c] = self.locs(pgn);
@@ -139,10 +110,7 @@ impl PGPolygon {
     }
 
     fn edges(&self, pgn: &PGNavmesh) -> [(Vec2, Vec2); 3] {
-        let [a3,b3,c3] = self.locs(pgn);
-        let a = a3.xz();
-        let b = b3.xz();
-        let c = c3.xz();
+        let [a,b,c] = self.locs_2d(pgn);
         return [(a,b),(b,c),(c,a)];
     }
     
@@ -155,6 +123,7 @@ impl PGPolygon {
             .skip(*bounds.start())
             .take(*bounds.end() + 1 - *bounds.start())
     }
+    
     pub fn edges_index(&self) -> impl Iterator<Item = [usize; 2]> + '_ {
         self.vertices
             .windows(2)
@@ -192,7 +161,6 @@ impl PGPolygon {
             }
         }
     }
-
 
     pub(crate) fn closest_point(&self, p: &Vec2, pgn: &PGNavmesh) -> Vec2 {
 

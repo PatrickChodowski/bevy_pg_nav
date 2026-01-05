@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
 use serde::{Deserialize, Serialize};
-use bvh2d::bvh2d::BVH2d;
-use bvh2d::aabb::{AABB, Bounded};
+use bevy_pg_core::prelude::AABB;
 
+use crate::bvh::{BVH, BHVType, BVHNode, aabb_intersects_triangle};
 use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
 use crate::plugin::ORIGIN_HEIGHT;
 use crate::types::{PGPolygon, PGVertex};
@@ -13,16 +13,6 @@ pub enum PGNavmeshType {
     Terrain,
     Water
 }
-struct BoundedPolygon {
-    aabb: (Vec2, Vec2),
-}
-
-impl Bounded for BoundedPolygon {
-    fn aabb(&self) -> AABB {
-        AABB::with_bounds(self.aabb.0, self.aabb.1)
-    }
-}
-
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 pub struct PGNavmesh {
@@ -31,7 +21,7 @@ pub struct PGNavmesh {
     pub water_height: f32,
     pub search_limit: usize,
     pub typ:          PGNavmeshType,
-    pub baked:        Option<BVH2d>,
+    pub bvh:          BVH,
     pub chunk_id:     String,
     pub map_name:     String
 }
@@ -46,54 +36,47 @@ impl Default for PGNavmesh {
             typ: PGNavmeshType::Terrain,
             chunk_id: "065".to_string(),
             map_name: "hedeby".to_string(),
-            baked: None
+            bvh: BVH::empty()
         }
     }
 }
 
 
 impl PGNavmesh {
-    pub fn filename(&self) -> String {
-        let filename = match self.typ {
-            PGNavmeshType::Terrain => {
-                format!("./assets/navmesh/{}_{}_terrain.navmesh.json", self.map_name, self.chunk_id)
-            }
-            PGNavmeshType::Water => {
-                format!("./assets/navmesh/{}_{}_water.navmesh.json", self.map_name, self.chunk_id)
+    // pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
+    //     for (_polygon_id, polygon) in self.polygons.iter(){
+    //         if let Some(world_pos) = polygon.ray_intersection(&origin, &direction, &self) {
+    //             return Some((polygon, world_pos));
+    //         }
+    //     }
+    //     return None;
+    // }
+
+    pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
+        let loc = origin.xz();
+        for node in self.bvh.data.iter(){
+            if node.aabb.has_point(loc){
+                match &node.typ {
+                    BHVType::Leaf(polygons) => {
+                        for polygon_id in polygons.iter(){
+                            let polygon = self.polygon(polygon_id);
+                                if let Some(world_pos) = polygon.ray_intersection(&origin, &direction, &self) {
+                                    return Some((polygon, world_pos));
+                                }
+
+                        }
+                    }
+                    BHVType::Branch(aabbs) => {}
+                }
             }
         };
-        return filename;
-    }
-
-
-    pub fn get_polygon_height(
-        &self, 
-        loc:          &Vec2
-    ) -> Option<(&PGPolygon, f32)> {
-        if let Some((poly, world_pos)) = self.has_point(loc){
-            return Some((poly, world_pos.y as f32 - 1.75));
-        }
-        return None;
-    }
-
-    pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(Vec3, usize)>  {
-        let direction = direction.normalize();
-        for (polygon_index, polygon) in self.polygons.iter(){
-            if let Some(world_pos) = polygon.ray_intersection(&origin, &direction, &self){
-                return Some((world_pos, *polygon_index));
-            }
-        }
         return None;
     }
 
     pub fn has_point(&self, loc: &Vec2) -> Option<(&PGPolygon, Vec3)> {
         let origin: Vec3 = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
-        for (_polygon_id, polygon) in self.polygons.iter(){
-            if let Some(world_pos) = polygon.ray_intersection(&origin, &Vec3::NEG_Y, &self){
-                return Some((polygon, world_pos));
-            }
-        }
-        return None;
+        let direction: Vec3 = Vec3::NEG_Y;
+        return self.ray_intersection(&origin, &direction);
     }
 
     pub fn path_points(
@@ -161,50 +144,60 @@ impl PGNavmesh {
         return None;
     }
 
-
-    
-    pub (crate) fn bake(&mut self){
-        info!(" Baking into Bvh2d");
-
-        let bounded_polygons = self
-        .polygons
-        .iter_mut()
-        .map(|(_polygon_id, polygon)| BoundedPolygon {
-            aabb: polygon.vertices.iter().fold(
-                (vec2(f32::MAX, f32::MAX), Vec2::ZERO),
-                |mut aabb, v| {
-                    if let Some(v) = self.vertices.get(v) {
-                        if v.loc.x < aabb.0.x {
-                            aabb.0.x = v.loc.x;
-                        }
-                        if v.loc.z < aabb.0.y {
-                            aabb.0.y = v.loc.z;
-                        }
-                        if v.loc.x > aabb.1.x {
-                            aabb.1.x = v.loc.x;
-                        }
-                        if v.loc.z > aabb.1.y {
-                            aabb.1.y = v.loc.z;
-                        }
-                    }
-                    aabb
-                },
-            ),
-        })
-        .collect::<Vec<_>>();
-
-        self.baked = Some(BVH2d::build(&bounded_polygons));
-    }
-
     pub fn vertex(&self, id: &usize) -> &PGVertex {
-        return self.vertices.get(id).unwrap();
+        return self.vertices.get(id).expect(&format!("expected vertex {}", id));
     }
 
     pub fn polygon(&self, id: &usize) -> &PGPolygon {
         return self.polygons.get(id).expect(&format!("expected polygon {}", id));
     }
 
-    pub (crate) fn islands_removal(&mut self){
+    pub (crate) fn bake(&mut self) {
+        let mut bvh = BVH::empty();
+        const LAYER_NODE_COUNT: usize = 16;
+
+        let mut navmesh_aabb = AABB::new_min_max(); 
+        for (_vertex_id, vertex) in self.vertices.iter(){
+
+            if vertex.loc.x < navmesh_aabb.min_x {
+                navmesh_aabb.min_x = vertex.loc.x
+            }
+            if vertex.loc.z < navmesh_aabb.min_z {
+                navmesh_aabb.min_z = vertex.loc.z
+            }
+            if vertex.loc.x > navmesh_aabb.max_x {
+                navmesh_aabb.max_x = vertex.loc.x
+            }
+            if vertex.loc.z > navmesh_aabb.max_z {
+                navmesh_aabb.max_z = vertex.loc.z
+            }
+        }
+
+        let mut id: u32 = 0;
+        let small_aabbs = navmesh_aabb.split(LAYER_NODE_COUNT);
+        let mut nodes: Vec<BVHNode> = Vec::new();
+
+        for aabb in small_aabbs.iter(){
+            let mut node_polygons: Vec<usize> = Vec::new();
+            for (polygon_id, polygon) in self.polygons.iter(){
+                let [a,b,c] = polygon.locs_2d(self);
+                if aabb_intersects_triangle(aabb, a,b,c){
+                    node_polygons.push(*polygon_id);
+                }
+            }
+
+            info!("ID: {} polygon count: {}", id, node_polygons.len());
+
+            let node = BVHNode{id: id, aabb: *aabb, typ: BHVType::Leaf(node_polygons)};
+            nodes.push(node);
+            id += 1;
+        }
+        bvh.data = nodes;
+        self.bvh = bvh;
+    }
+
+
+    pub(crate) fn islands_removal(&mut self){
         let mut visited: HashSet<usize> = HashSet::new();
         let mut islands: Vec<Vec<usize>> = Vec::new();
 
@@ -447,7 +440,6 @@ impl PGNavmesh {
             let vertex_data = self.vertices.get_mut(vertex_id).unwrap();
             vertex_data.polygons = v_polygons.clone();
         }
-
     }
 
     pub fn ray_side_intersection(
@@ -516,7 +508,6 @@ impl PGNavmesh {
         best_point.map(|p| (p, best_polygon_id))
     }
 
-
     pub fn find_nearest_point_from(&self, origin: &Vec2, target: &Vec2) -> Option<(Vec2, usize)> {
 
         let (start_polygon, _world_pos) = self.has_point(origin).unwrap();
@@ -552,6 +543,19 @@ impl PGNavmesh {
 
         return best_point.map(|p| (p, best_polygon_id));
     }
+
+    pub fn filename(&self) -> String {
+        let filename = match self.typ {
+            PGNavmeshType::Terrain => {
+                format!("./assets/navmesh/{}_{}_terrain.navmesh.json", self.map_name, self.chunk_id)
+            }
+            PGNavmeshType::Water => {
+                format!("./assets/navmesh/{}_{}_water.navmesh.json", self.map_name, self.chunk_id)
+            }
+        };
+        return filename;
+    }
+
 }
 
 

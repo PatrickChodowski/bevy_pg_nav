@@ -20,7 +20,6 @@ use crate::terrain::TerrainRayMeshData;
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
-
 pub struct PGNavPlugin;
 
 impl Plugin for PGNavPlugin {

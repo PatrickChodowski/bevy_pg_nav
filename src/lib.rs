@@ -7,6 +7,7 @@ mod water;
 mod terrain;
 mod tools;
 mod types;
+mod bvh;
 
 pub mod prelude {
     pub use crate::debug::display_polygon;
