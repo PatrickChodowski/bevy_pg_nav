@@ -3,7 +3,8 @@ use rerecast::{PolygonNavmesh, DetailNavmesh};
 use bevy_rerecast::Navmesh;
 use bevy::prelude::{info, default};
 
-use crate::{plugin::PGNavmeshType, types::{PGNavmesh, PGPolygon, PGVertex}};
+use crate::types::{PGPolygon, PGVertex};
+use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
 trait RecastPolyMeshDetailExt {
     fn common_vertices(&self) -> HashMap<u32, Vec<u32>>;

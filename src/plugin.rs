@@ -18,7 +18,8 @@ use crate::water::{
 };
 use crate::terrain::TerrainRayMeshData;
 use crate::recast_convert::convert_rerecast;
-use crate::types::PGNavmesh;
+use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
+
 
 pub struct PGNavPlugin;
 
@@ -162,12 +163,6 @@ fn trigger_navmesh(
     mut commands:  Commands
 ){
     commands.trigger(GenerateNavMesh::default());
-}
-
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize)]
-pub enum PGNavmeshType {
-    Terrain,
-    Water
 }
 
 #[derive(Component)]
@@ -427,6 +422,7 @@ fn on_ready_navmesh(
                 pgn.cleanup_lower();
                 pgn.reorder_vertex_polygons();
                 pgn.islands_removal();
+                pgn.bake();
                 
                 commands.spawn(pgn.clone());
 

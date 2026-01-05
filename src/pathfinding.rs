@@ -11,7 +11,9 @@ use std::{
 };
 use std::fmt;
 use std::collections::BinaryHeap;
-use crate::types::{PGNavmesh, PGPolygon, PGVertex};
+
+use crate::types::{PGPolygon, PGVertex};
+use crate::pgnavmesh::PGNavmesh;
 
 pub(crate) const DEBUG: bool = false;
 

@@ -4,8 +4,9 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy_pg_core::prelude::{GameState, PointerData};
 
-use crate::plugin::{NavConfig, PGNavmeshType};
-use crate::types::{PGNavmesh, PGPolygon};
+use crate::plugin::NavConfig;
+use crate::types::PGPolygon;
+use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
 
 pub struct PGNavDebugPlugin;

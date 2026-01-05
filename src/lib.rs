@@ -1,5 +1,6 @@
 mod debug;
 mod pathfinding;
+mod pgnavmesh;
 mod plugin;
 mod recast_convert;
 mod water;
@@ -12,8 +13,9 @@ pub mod prelude {
     pub use crate::pathfinding::{Path, PathFinder, SearchStep};
     pub use crate::plugin::{
         GenerateNavMesh, NavConfig, PGNavPlugin, NavStatic, 
-        NavStaticShape, NavStaticType, NavmeshTerrain, NavmeshWater, PGNavmeshType
+        NavStaticShape, NavStaticType, NavmeshTerrain, NavmeshWater
     };
     pub use crate::terrain::TerrainRayMeshData;
-    pub use crate::types::{PGNavmesh, PGPolygon, PGVertex, find_point};
+    pub use crate::types::{PGPolygon, PGVertex};
+    pub use crate::pgnavmesh::{PGNavmesh, PGNavmeshType, find_point};
 }
