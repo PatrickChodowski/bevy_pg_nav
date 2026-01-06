@@ -561,26 +561,28 @@ impl PGNavmesh {
 
 
 // Search for the point in query of navmeshes
-pub fn find_point<'a>(point: &Vec2, navs: &Query<(Entity, &PGNavmesh)>) -> Option<Entity> {
+pub fn find_point<'a>(
+    point: &Vec2, 
+    navs: &Query<(Entity, &PGNavmesh)>,
+) -> Option<(Entity, Vec3, PGNavmeshType)> {
 
     let mut highest_nav_entity: Option<Entity> = None;
     let mut highest_world_pos: Vec3 = Vec3::MIN;
-    // let mut highest_navmesh: Option<&PGNavmesh> = None;
+    let mut highest_navmesh: Option<&PGNavmesh> = None;
 
     for (navmesh_entity, navmesh) in navs.iter(){
         if let Some((_polygon, world_pos)) = navmesh.has_point(point){
             if world_pos.y > highest_world_pos.y {
                 highest_world_pos = world_pos;
                 highest_nav_entity = Some(navmesh_entity);
-                // highest_navmesh = Some(navmesh);
+                highest_navmesh = Some(navmesh);
             }
         }
     }
 
     if let Some(nav_entity) = highest_nav_entity {
         return Some(
-            nav_entity, 
-            // highest_navmesh.unwrap()
+            (nav_entity, highest_world_pos, highest_navmesh.unwrap().typ)
         );
     }
 
