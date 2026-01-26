@@ -64,6 +64,28 @@ impl PGPolygon {
         return (a + b + c)/3.0;
     }
 
+    pub fn get_height(&self, p: Vec2, pgn: &PGNavmesh) -> f32 {
+        let [a,b,c] = self.locs(pgn);
+        let v0 = c.xz() - a.xz();
+        let v1 = b.xz() - a.xz();
+        let v2 = p - a.xz();
+
+        let dot00 = v0.dot(v0);
+        let dot01 = v0.dot(v1);
+        let dot02 = v0.dot(v2);
+        let dot11 = v1.dot(v1);
+        let dot12 = v1.dot(v2);
+
+        let inv_denom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+        let u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+        let v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+        let w = 1.0 - u - v;
+
+        // Interpolate Y
+        a.y * w + b.y * v + c.y * u
+
+    }
+
     pub fn ray_intersection(
         &self, 
         origin:    &Vec3, 

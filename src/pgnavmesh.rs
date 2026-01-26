@@ -43,15 +43,6 @@ impl Default for PGNavmesh {
 
 
 impl PGNavmesh {
-    // pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
-    //     for (_polygon_id, polygon) in self.polygons.iter(){
-    //         if let Some(world_pos) = polygon.ray_intersection(&origin, &direction, &self) {
-    //             return Some((polygon, world_pos));
-    //         }
-    //     }
-    //     return None;
-    // }
-
     pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
         let loc = origin.xz();
         for node in self.bvh.data.iter(){
@@ -78,6 +69,40 @@ impl PGNavmesh {
         let direction: Vec3 = Vec3::NEG_Y;
         return self.ray_intersection(&origin, &direction);
     }
+
+    pub fn clamp_move(
+        &self,
+        target_pos: Vec2,
+        current_poly_index: usize
+    ) -> (Vec3, usize) {
+
+        let mut closest_point = target_pos;
+        let mut min_dist_sq = f32::MAX;
+        let mut best_poly_index = current_poly_index;
+
+        let mut candidates = vec![current_poly_index];
+        let current_poly = self.polygon(&current_poly_index);
+        candidates.extend(&current_poly.neighbours);
+        
+        for &idx in &candidates {
+            let poly = self.polygon(&idx);
+            let [a, b, c] = poly.locs_2d(&self);
+            let clamped_2d = closest_point_on_triangle_2d(target_pos, a,b,c);
+            let dist_sq = clamped_2d.distance_squared(target_pos);
+            if dist_sq < min_dist_sq {
+                min_dist_sq = dist_sq;
+                closest_point = clamped_2d;
+                best_poly_index = idx;
+            }
+        }
+
+        let poly = self.polygon(&best_poly_index);
+        let height = poly.get_height(closest_point, &self);
+
+        return (Vec3::new(closest_point.x, height, closest_point.y), best_poly_index);
+    }
+
+
 
     pub fn path_points(
         &self, 
@@ -195,7 +220,6 @@ impl PGNavmesh {
         bvh.data = nodes;
         self.bvh = bvh;
     }
-
 
     pub(crate) fn islands_removal(&mut self){
         let mut visited: HashSet<usize> = HashSet::new();
@@ -562,8 +586,8 @@ impl PGNavmesh {
 
 // Search for the point in query of navmeshes
 pub fn find_point<'a>(
-    point: &Vec2, 
-    navs: &Query<(Entity, &PGNavmesh)>,
+    point:     &Vec2, 
+    navs:      &Query<(Entity, &PGNavmesh)>
 ) -> Option<(Entity, Vec3, PGNavmeshType)> {
 
     let mut highest_nav_entity: Option<Entity> = None;
@@ -587,4 +611,53 @@ pub fn find_point<'a>(
     }
 
     return None;
+}
+
+
+
+fn closest_point_on_segment_2d(p: Vec2, a: Vec2, b: Vec2) -> Vec2 {
+    let ab = b - a;
+    let t = (p - a).dot(ab) / ab.length_squared();
+    let t_clamped = t.clamp(0.0, 1.0);
+    a + ab * t_clamped
+}
+/// Checks if a 2D point is inside a 2D triangle
+fn is_point_in_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
+    let v0 = c - a;
+    let v1 = b - a;
+    let v2 = p - a;
+
+    let dot00 = v0.dot(v0);
+    let dot01 = v0.dot(v1);
+    let dot02 = v0.dot(v2);
+    let dot11 = v1.dot(v1);
+    let dot12 = v1.dot(v2);
+
+    let inv_denom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+    let u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+    let v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+
+    (u >= 0.0) && (v >= 0.0) && (u + v <= 1.0)
+}
+
+/// Finds the closest point on a 2D triangle to a 2D point
+fn closest_point_on_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
+    // 1. If inside, return the point itself
+    if is_point_in_triangle_2d(p, a, b, c) {
+        return p;
+    }
+
+    // 2. If outside, clamp to the closest edge
+    let closest_ab = closest_point_on_segment_2d(p, a, b);
+    let closest_bc = closest_point_on_segment_2d(p, b, c);
+    let closest_ca = closest_point_on_segment_2d(p, c, a);
+
+    let d_ab = p.distance_squared(closest_ab);
+    let d_bc = p.distance_squared(closest_bc);
+    let d_ca = p.distance_squared(closest_ca);
+
+    // Return the closest of the three edge points
+    if d_ab < d_bc && d_ab < d_ca { closest_ab }
+    else if d_bc < d_ca { closest_bc }
+    else { closest_ca }
 }
