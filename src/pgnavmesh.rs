@@ -114,7 +114,7 @@ impl PGNavmesh {
         let from = *from0;
         let to = *to0;
         let starting_polygon: &PGPolygon = self.has_point(&from).map(|p| p.0).unwrap();
-        let ending_polygon: &PGPolygon = self.has_point(&to).map(|p| p.0).unwrap();
+        let Some(ending_polygon) = self.has_point(&to).map(|p| p.0) else {return None};
 
         if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
