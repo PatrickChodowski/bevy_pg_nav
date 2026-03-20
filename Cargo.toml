@@ -1,6 +1,6 @@
 [package]
 name = "bevy_pg_nav"
-version = "1.17.0"
+version = "1.18.0"
 edition = "2024"
 description = "PG (PatchGames) Navigation to be used with Bevy"
 license = "MIT OR Apache-2.0"
@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 
 
 [dependencies]
-bevy = {version = "0.17", default-features = false, features = [
+bevy = {version = "0.18", default-features = false, features = [
     "bevy_asset",
     "bevy_log",
     "bevy_render",
@@ -18,18 +18,21 @@ bevy = {version = "0.17", default-features = false, features = [
 ]}
 serde = "1.0"
 serde_json = "1.0"
-libm = "0.2.11"
-bevy_common_assets = {version = "0.14.0", default-features = false, features = ["json"]}
+libm = "0.2"
+bevy_common_assets = {version = "0.15.0", default-features = false, features = ["json"]}
 itertools = "0.13.0"
 smallvec = { version = "1.15", features = ["union", "const_generics","serde"] }
 ordered-float = "4.5.0"
 num-traits = "0.2.19"
-bevy_pg_core = {git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
+bevy_pg_core = {version="1.18.0", git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
 
-rerecast = {path="../rerecast/crates/rerecast"}
-avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
-bevy_rerecast = {path="../rerecast/crates/bevy_rerecast"}
+# rerecast = {path="../rerecast/crates/rerecast"}
+# avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
+# bevy_rerecast = {path="../rerecast/crates/bevy_rerecast"}
 dashmap = {version="6.1.0", features = ["rayon"] }
 rayon = "1.11.0"
 earcutr = "0.5.0"
+avian_rerecast = "0.3.0"
+bevy_rerecast = "0.4.0"
+rerecast = "0.3.0"
 
