@@ -11,7 +11,7 @@ use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 // use crate::types::Neighbours;
 
 // Generate Optimized data structure for raycast testing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Component)]
 pub struct TerrainRayMeshData {
     pub mesh_transform:            Mat4,
     triangle_vertex_positions: Vec<[Vec3A; 3]>,
@@ -35,7 +35,7 @@ impl TerrainRayMeshData {
     }
 
     pub fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
-        if let Some(intersection_data) = self.ray_intersection(ray){
+        if let Some(intersection_data) = self.ray_intersection(&ray.origin(), &ray.direction()){
             let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
             return Some((height, intersection_data.triangle_index, intersection_data.normal));
@@ -291,18 +291,16 @@ impl TerrainRayMeshData {
         return (s0 + s1) - s2 <= EPSILON;
     }
 
-
-
-
     // Tests against all triangles of the mesh
-    fn ray_intersection(
+    pub fn ray_intersection(
         &self, 
-        ray: &NavRay
+        ray_origin: &Vec3,
+        ray_direction: &Vec3
     ) -> Option<IntersectionData> {
 
         let mesh_space_ray = NavRay::new(
-            self.mesh_transform.transform_point3(ray.origin()),
-            self.mesh_transform.transform_vector3(ray.direction()),
+            self.mesh_transform.transform_point3(*ray_origin),
+            self.mesh_transform.transform_vector3(*ray_direction),
         );
 
         for triangle_index in 0..self.triangle_count{
@@ -311,17 +309,17 @@ impl TerrainRayMeshData {
             let tri_normal = self.triangle_normal(triangle_index);
 
             if let Some(ray_hit) = ray_triangle_intersection(&mesh_space_ray, &tri_vertices) {
-                let distance = *ray_hit.distance();
-                // info!("distance: {}", distance);
-                if distance > 0.0 {
+
+                if ray_hit.distance > 0.0 {
                     // let u = ray_hit.uv_coords().0;
                     // let v = ray_hit.uv_coords().1;
                     // let w = 1.0 - u - v;
                     // let normal: Vec3 = (tri_normals * u + tri_normals * v + tri_normals * w).into();
                     let intersection = IntersectionData::new(
+                        self.mesh_transform.transform_point3(ray_hit.position),
                         self.mesh_transform.transform_vector3(tri_normal.into()),
                         self.mesh_transform
-                            .transform_vector3(mesh_space_ray.direction() * distance)
+                            .transform_vector3(mesh_space_ray.direction() * ray_hit.distance)
                             .length(),
                         triangle_index
                     );

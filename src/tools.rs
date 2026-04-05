@@ -44,36 +44,17 @@ impl From<Ray3d> for NavRay {
     }
 }
 
-
-#[inline(always)]
-pub(crate) fn ray_triangle_intersection(
-    ray: &NavRay,
-    triangle: &[Vec3A; 3]
-) -> Option<RayHit> {
-    raycast_moller_trumbore(ray, triangle)
-}
-
-
 #[derive(Default, Debug)]
 pub(crate) struct RayHit {
     pub(crate) distance: f32,
     pub(crate) uv_coords: (f32, f32),
+    pub(crate) position: Vec3,
 }
 
-impl RayHit {
-    /// Get a reference to the intersection's uv coords.
-    pub(crate) fn uv_coords(&self) -> &(f32, f32) {
-        &self.uv_coords
-    }
 
-    /// Get a reference to the intersection's distance.
-    pub(crate) fn distance(&self) -> &f32 {
-        &self.distance
-    }
-}
 
 /// Implementation of the Möller-Trumbore ray-triangle intersection test
-fn raycast_moller_trumbore(
+pub(crate) fn ray_triangle_intersection(
     ray: &NavRay,
     triangle: &[Vec3A; 3]
 ) -> Option<RayHit> {
@@ -103,16 +84,19 @@ fn raycast_moller_trumbore(
 
     // The distance between ray origin and intersection is t.
     let t: f32 = vector_v0_to_v2.dot(q_vec) * determinant_inverse;
+    let hit_position = ray.origin + ray.direction * t;
 
     Some(RayHit {
         distance: t,
         uv_coords: (u, v),
+        position: Vec3::from(hit_position)
     })
 }
 
 
 #[derive(Debug, Clone)]
 pub struct IntersectionData {
+    pub position: Vec3,
     pub normal: Vec3,
     pub distance: f32,
     pub triangle_index: usize
@@ -120,10 +104,12 @@ pub struct IntersectionData {
 
 impl IntersectionData {
     pub fn new(
+        position: Vec3,
         normal: Vec3, 
         distance: f32,
         triangle_index: usize) -> Self {
         Self {
+            position,
             normal,
             distance,
             triangle_index
