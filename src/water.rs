@@ -1,9 +1,10 @@
-use bevy::prelude::{info, Component, Event, Vec3A};
+use bevy::prelude::{info, Component, Event, Vec3A, Vec2};
 use bevy::mesh::Mesh;
 use bevy::platform::collections::{HashSet, HashMap};
 use dashmap::DashMap;
 use rayon::prelude::*;
 
+use bevy_pg_core::prelude::AABB;
 use crate::terrain::TerrainRayMeshData;
 use crate::tools::NavRay;
 
@@ -51,7 +52,7 @@ pub(crate) fn raycasts_rain(
     zs:             &Vec<f32>,
     // ray_target_meshes:     &Vec<RayTargetMesh>,
     trmd:           &TerrainRayMeshData,
-    water_height:   f32
+    waters:         &Vec<(AABB, f32)>
 ) ->  Vec<WaterVertex> {
 
     let raycast_map: DashMap<(usize, usize), Vec3A> = DashMap::new();
@@ -63,12 +64,18 @@ pub(crate) fn raycasts_rain(
               .map(move |(z_index, &z)| (x_index, x, z_index, z)))
               .for_each(|(x_index, x, z_index, z)|{
 
-        let ray: NavRay = NavRay::down(x as f32, z as f32);
+        let ray: NavRay = NavRay::down(x, z);
 
         // Check against the terrain
-        if let Some((terrain_height, _group_id, normal)) = trmd.test(&ray){
-            let mut height: f32 = terrain_height;
+        if let Some((terrain_height, _group_id, _normal)) = trmd.test(&ray){
 
+            let mut maybe_water_height: Option<f32> = None;
+            for (water_aabb, water_height) in waters.iter(){
+                if water_aabb.has_point(Vec2::new(x,z)){
+                    maybe_water_height = Some(*water_height);
+                    break;
+                }
+            }
 
             // Check against blockers and navigables
             // for rm in ray_target_meshes.iter(){
@@ -81,13 +88,13 @@ pub(crate) fn raycasts_rain(
             //         break;
             //     }
             // }
-            
-            // Check for water
-            if height <= water_height { 
-                height = water_height;
-                let tile = (x_index, z_index);
-                let loc = Vec3A::new(x, water_height, z);
-                raycast_map.insert(tile, loc);
+
+            if let Some(water_height) = maybe_water_height {
+                if terrain_height <= water_height {
+                    let tile = (x_index, z_index);
+                    let loc = Vec3A::new(x, water_height, z);
+                    raycast_map.insert(tile, loc);
+                }
             }
         }
     });

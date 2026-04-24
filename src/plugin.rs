@@ -1,14 +1,14 @@
-use bevy::color::palettes::css::{BLACK, WHITE};
+use bevy::color::palettes::css::WHITE;
 use serde::{Serialize, Deserialize};
 use bevy::tasks::IoTaskPool;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use bevy_common_assets::json::JsonAssetPlugin;
-use bevy::{input::common_conditions::input_just_pressed, prelude::*};
+use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy_rerecast::{debug::DetailNavmeshGizmo, prelude::*};
 use bevy_rerecast::Mesh3dBackendPlugin;
-use bevy_pg_core::prelude::{TerrainChunk, GameState};
+use bevy_pg_core::prelude::{AABB, GameState, TerrainChunk, WaterChunk};
 
 use crate::debug::PGNavDebugPlugin;
 use crate::water::{
@@ -33,9 +33,8 @@ impl Plugin for PGNavPlugin {
         .insert_resource(NavConfig::default())
         .init_asset::<PGNavmesh>()
         .add_message::<GenerateNavMesh>()
-        .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["navmesh.json"]))
+        .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]))
         .add_plugins(PGNavDebugPlugin)
-        .add_systems(Update, trigger_navmesh.run_if(input_just_pressed(KeyCode::KeyG)))
         .insert_resource(RecastNavmeshHandles::default())
 
         .add_observer(generate_terrain_navmesh)
@@ -138,7 +137,6 @@ impl NavStaticShape {
     Resource, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Clone, Deserialize, Serialize
 )]
 pub struct NavConfig {
-    pub water_height: f32,
     pub raycast_step: u32,
     pub offset_y: f32, // Offset on Display only
     pub iter_count_limit: usize,
@@ -148,7 +146,6 @@ pub struct NavConfig {
 impl Default for NavConfig {
     fn default() -> Self {
         NavConfig{
-            water_height: 180.0,
             raycast_step: 10,
             offset_y: 20.0,
             iter_count_limit: 20,
@@ -156,12 +153,6 @@ impl Default for NavConfig {
             debug: true
         }
     }
-}
-
-fn trigger_navmesh(
-    mut commands:  Commands
-){
-    commands.trigger(GenerateNavMesh::default());
 }
 
 #[derive(Component)]
@@ -174,39 +165,8 @@ pub struct NavmeshTerrain;
 
 #[derive(Event, Message)]
 pub struct GenerateNavMesh {
-    pub name:     String,
-    pub map_name: String,
-    pub chunk_id: String,
-    pub chunk_size: f32
+    pub plane_entity: Entity
 }
-impl Default for GenerateNavMesh {
-    fn default() -> Self {
-        GenerateNavMesh{
-            name: "".to_string(), 
-            map_name: "".to_string(), 
-            chunk_id: "".to_string(), 
-            chunk_size: 0.0
-        }
-    }
-}
-
-impl GenerateNavMesh {
-    pub fn new(
-        name: String,
-        map_name: &str, 
-        chunk_id: &str,
-        chunk_size: f32
-    
-    ) -> Self{
-        GenerateNavMesh {
-            name,
-            map_name: map_name.to_string(), 
-            chunk_id: chunk_id.to_string(),
-            chunk_size
-        }
-    }
-}
-
 
 #[derive(Resource, Debug)]
 struct RecastNavmeshHandles {
@@ -268,82 +228,90 @@ fn on_water_navmesh_sources_ready(
     navmesh_handles.data.insert(PGNavmeshType::Water, Some(navmesh));
 }
 
+
 fn generate_water_navmesh(
-    _trigger:       On<GenerateNavMesh>,
-    terrains:       Query<(&Transform, &Mesh3d, &Name), With<TerrainChunk>>,
+    trigger:        On<GenerateNavMesh>,
+    terrains:       Query<(&Transform, &Mesh3d, &Name, &TerrainChunk)>,
+    water_query:    Query<(&Transform, &WaterChunk)>,
     mut commands:   Commands,
     mut meshes:     ResMut<Assets<Mesh>>,
     mut materials:  ResMut<Assets<StandardMaterial>>,
     navconfig:      Res<NavConfig>
 ){
     let raycast_step = navconfig.raycast_step as usize;
-    let water_height: f32 = navconfig.water_height;
     let extent: f32 = navconfig.raycast_step as f32 * 0.5;
-    let half_chunk_size: f32 = 2500.0;
+    
+    let Ok((terrain_transform, mesh3d, _terrain_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
+    let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
-    for (terrain_transform, mesh3d, terrain_name) in terrains.iter(){
+    let half_chunk_size: f32 = chunk.dims.x*0.5;
+    let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
+    let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
+    let loc = terrain_transform.translation;
 
-        let Some(mesh) = meshes.get(&mesh3d.0) else {continue;};
-        let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
-        let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
-        let loc = terrain_transform.translation;
+    let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
+    let max_x = (loc.x + half_chunk_size + safety_offset) as u32;
+    let min_z = (loc.z - half_chunk_size - safety_offset) as u32;
+    let max_z = (loc.z + half_chunk_size + safety_offset) as u32;
 
-        let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
-        let max_x = (loc.x + half_chunk_size + safety_offset) as u32;
-        let min_z = (loc.z - half_chunk_size - safety_offset) as u32;
-        let max_z = (loc.z + half_chunk_size + safety_offset) as u32;
+    let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
+    let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
 
-        let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
-        let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
+    let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
+    let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
 
-        let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-        let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-
-        let mut water_hits = raycasts_rain(&xs, &zs, &trmd, water_height);
-        let groups_map = group_waters(&mut water_hits, max_x, max_z);
-
-        // Order groups
-        let mut hm_groups: HashMap<usize, Vec<WaterVertex>> = HashMap::new();
-        for (_tile, vertex) in groups_map.iter(){
-            hm_groups.entry(vertex.group).or_insert(Vec::new()).push(*vertex);
-        }
-
-        let mut triangle_map: HashMap<usize, Vec<[Vec3A; 3]>> = HashMap::new();
-        for (group, vertices) in hm_groups.iter_mut(){
-            let mut vlocs: Vec<Vec3A> = order_boundary(vertices, max_x, max_z);
-            info!(" Group: {} Vertices count after order_boundary: {}", group, vertices.len());
-            vlocs = remove_collinear(&mut vlocs);
-            info!(" Group: {} Vertices count after remove_collinear: {}", group, vertices.len());
-            let triangles = triangulate(&mut vlocs);
-            let mesh = mesh_from_triangles(&triangles);
-            triangle_map.insert(*group, triangles);
-
-            commands.spawn(
-                (
-                    Mesh3d(meshes.add(mesh)),
-                    MeshMaterial3d(materials.add(StandardMaterial::from(Color::from(WHITE)))),
-                    WaterNavmeshSource,
-                    Visibility::Hidden
-                )
-            );
-        }
-
-        commands.trigger(WaterNavmeshesReady);
+    let mut water_aabbs: Vec<(AABB, f32)> = Vec::new();
+    for (water_transform, water_chunk) in water_query.iter(){
+        let water_aabb: AABB = AABB::from_loc_dims(water_transform.translation.xz(), water_chunk.dims);
+        water_aabbs.push((water_aabb, water_transform.translation.y));
     }
+
+    let mut water_hits = raycasts_rain(&xs, &zs, &trmd, &water_aabbs);
+    let groups_map = group_waters(&mut water_hits, max_x, max_z);
+
+    // Order groups
+    let mut hm_groups: HashMap<usize, Vec<WaterVertex>> = HashMap::new();
+    for (_tile, vertex) in groups_map.iter(){
+        hm_groups.entry(vertex.group).or_insert(Vec::new()).push(*vertex);
+    }
+
+    let mut triangle_map: HashMap<usize, Vec<[Vec3A; 3]>> = HashMap::new();
+    for (group, vertices) in hm_groups.iter_mut(){
+        let mut vlocs: Vec<Vec3A> = order_boundary(vertices, max_x, max_z);
+        info!(" Group: {} Vertices count after order_boundary: {}", group, vertices.len());
+        vlocs = remove_collinear(&mut vlocs);
+        info!(" Group: {} Vertices count after remove_collinear: {}", group, vertices.len());
+        let triangles = triangulate(&mut vlocs);
+        let mesh = mesh_from_triangles(&triangles);
+        triangle_map.insert(*group, triangles);
+
+        commands.spawn(
+            (
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial::from(Color::from(WHITE)))),
+                WaterNavmeshSource,
+                Visibility::Hidden
+            )
+        );
+    }
+
+    commands.trigger(WaterNavmeshesReady);
+    
 }
 
 fn generate_terrain_navmesh(
-    _trigger:            On<GenerateNavMesh>,
+    trigger:             On<GenerateNavMesh>,
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
-    terrain_entity:      Single<Entity, With<TerrainChunk>>,
     statics:             Query<(Entity, &NavStatic, &Name)>,
     mut navmesh_handles: ResMut<RecastNavmeshHandles>
 ){
-    info!("[NAV] Generate terrain navmesh");
 
-    let mut hs = HashSet::new();
-    hs.insert(*terrain_entity);
+    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
+
+    // Start using plane entity
+    let mut hs: HashSet<Entity> = HashSet::new();
+    hs.insert(trigger.plane_entity);
 
     for (entity, nstatic, name) in statics.iter(){
         if (nstatic.typ == NavStaticType::Blocker) & ((name.contains("Bld")) | name.contains("Prop")) {
@@ -357,7 +325,6 @@ fn generate_terrain_navmesh(
         }
     }
 
-
     // let mut count_blockers: usize = 0;
     // for (entity, nstatic, name) in statics.iter(){
     //     if (nstatic.typ == NavStaticType::Blocker) & (name.contains("Tree")) {
@@ -369,7 +336,6 @@ fn generate_terrain_navmesh(
     //         break;
     //     }
     // }
-
 
     let settings = NavmeshSettings {
         filter: Some(hs),
@@ -414,11 +380,10 @@ fn on_ready_navmesh(
                 
                 let mut pgn: PGNavmesh = convert_rerecast(
                     recast_navmesh,
-                    navconfig.water_height,
                     navmesh_type
                 );
 
-                pgn.cleanup_lower();
+                // pgn.cleanup_lower();
                 pgn.reorder_vertex_polygons();
                 pgn.islands_removal();
                 pgn.bake();
@@ -442,8 +407,7 @@ fn on_ready_navmesh(
 fn on_spawn_navmesh(
    trigger:       On<Add, PGNavmesh>,
    mut commands:  Commands,
-   navs:          Query<&PGNavmesh>,
-   navconfig:     Res<NavConfig>
+   navs:          Query<&PGNavmesh>
 ){
     if let Ok(navmesh) = navs.get(trigger.entity){
         match navmesh.typ {
@@ -454,9 +418,5 @@ fn on_spawn_navmesh(
                 commands.entity(trigger.entity).insert(NavmeshWater);
             }
         }
-
-        // if navconfig.debug {
-        //     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
-        // }
     }
 }

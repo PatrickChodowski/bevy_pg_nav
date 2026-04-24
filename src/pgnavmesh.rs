@@ -18,12 +18,10 @@ pub enum PGNavmeshType {
 pub struct PGNavmesh {
     pub polygons:     HashMap<usize, PGPolygon>,
     pub vertices:     HashMap<usize, PGVertex>,
-    pub water_height: f32,
     pub search_limit: usize,
     pub typ:          PGNavmeshType,
     pub bvh:          BVH,
-    pub chunk_id:     String,
-    pub map_name:     String
+    pub name:         String
 }
 
 impl Default for PGNavmesh {
@@ -31,11 +29,9 @@ impl Default for PGNavmesh {
         PGNavmesh{
             polygons: HashMap::default(),
             vertices: HashMap::default(),
-            water_height: 180.0,
             search_limit: 1000,
             typ: PGNavmeshType::Terrain,
-            chunk_id: "065".to_string(),
-            map_name: "hedeby".to_string(),
+            name: "test".to_string(),
             bvh: BVH::empty()
         }
     }
@@ -282,7 +278,7 @@ impl PGNavmesh {
 
     }
 
-    pub(crate) fn cleanup_lower(&mut self){
+    pub(crate) fn cleanup_lower(&mut self, cutoff_height: f32){
 
         if self.typ != PGNavmeshType::Terrain {
             return;
@@ -300,7 +296,6 @@ impl PGNavmesh {
         // if all 3 vertices are below water, remove polygon
 
         if DEBUG {
-            info!(" [debug] water height: {}", self.water_height);
             info!(" [debug] total vertices {}", self.vertices.len());
             info!(" [debug] total polygons {}", self.polygons.len());
         }
@@ -321,7 +316,7 @@ impl PGNavmesh {
                 let v = self.vertex(v_index);
 
                 // info!("v loc: {}", v.loc);
-                if v.loc.y < self.water_height {
+                if v.loc.y < cutoff_height {
                     low_count += 1;
                     possible_vertices_to_rm.insert(*v_index);
                 }
@@ -571,10 +566,10 @@ impl PGNavmesh {
     pub fn filename(&self) -> String {
         let filename = match self.typ {
             PGNavmeshType::Terrain => {
-                format!("./assets/navmesh/{}_{}_terrain.navmesh.json", self.map_name, self.chunk_id)
+                format!("./assets/scenes/navs/{}_terrain.nav.json", self.name)
             }
             PGNavmeshType::Water => {
-                format!("./assets/navmesh/{}_{}_water.navmesh.json", self.map_name, self.chunk_id)
+                format!("./assets/scenes/navs/{}_water.nav.json", self.name)
             }
         };
         return filename;

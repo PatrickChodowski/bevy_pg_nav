@@ -31,7 +31,6 @@ impl RecastPolyMeshDetailExt for DetailNavmesh {
 
 pub(crate) fn convert_rerecast(
     renav: &Navmesh,
-    water_height: f32,
     typ:   &PGNavmeshType
 ) -> PGNavmesh {
 
@@ -117,7 +116,6 @@ pub(crate) fn convert_rerecast(
     let pgn = PGNavmesh {
         polygons: polygon_map,
         vertices: vertex_map,
-        water_height,
         typ: *typ,
         ..default()
     };
