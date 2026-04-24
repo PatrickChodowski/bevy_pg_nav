@@ -32,7 +32,6 @@ impl Plugin for PGNavPlugin {
         ))
         .insert_resource(NavConfig::default())
         .init_asset::<PGNavmesh>()
-        .add_message::<GenerateNavMesh>()
         .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]))
         .add_plugins(PGNavDebugPlugin)
         .insert_resource(RecastNavmeshHandles::default())
@@ -163,7 +162,7 @@ pub struct NavmeshTerrain;
 
 
 
-#[derive(Event, Message)]
+#[derive(Event)]
 pub struct GenerateNavMesh {
     pub plane_entity: Entity
 }
@@ -238,15 +237,21 @@ fn generate_water_navmesh(
     mut materials:  ResMut<Assets<StandardMaterial>>,
     navconfig:      Res<NavConfig>
 ){
+
+    info!("Generate Water Navmesh 0");
     let raycast_step = navconfig.raycast_step as usize;
     let extent: f32 = navconfig.raycast_step as f32 * 0.5;
     
     let Ok((terrain_transform, mesh3d, _terrain_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
+    info!("Generate Water Navmesh 1");
     let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
+    info!("Generate Water Navmesh 2");
     let half_chunk_size: f32 = chunk.dims.x*0.5;
     let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
     let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
+
+    info!("Generate Water Navmesh 3");
     let loc = terrain_transform.translation;
 
     let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
