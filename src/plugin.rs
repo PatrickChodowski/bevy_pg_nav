@@ -30,14 +30,14 @@ impl Plugin for PGNavPlugin {
             Mesh3dBackendPlugin::default(),
             // AvianBackendPlugin::default()
         ))
-        .insert_resource(NavConfig::default())
+        // .insert_resource(NavConfig::default())
         .init_asset::<PGNavmesh>()
         .add_plugins(JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]))
         .add_plugins(PGNavDebugPlugin)
         .insert_resource(RecastNavmeshHandles::default())
 
         .add_observer(generate_terrain_navmesh)
-        .add_observer(generate_water_navmesh)
+        // .add_observer(generate_water_navmesh)
         .add_observer(on_water_navmesh_sources_ready)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
@@ -142,17 +142,17 @@ pub struct NavConfig {
     pub serialize: bool,
     pub debug: bool
 }
-impl Default for NavConfig {
-    fn default() -> Self {
-        NavConfig{
-            raycast_step: 10,
-            offset_y: 20.0,
-            iter_count_limit: 20,
-            serialize: true,
-            debug: true
-        }
-    }
-}
+// impl Default for NavConfig {
+//     fn default() -> Self {
+//         NavConfig{
+//             raycast_step: 10,
+//             offset_y: 1.0,
+//             iter_count_limit: 20,
+//             serialize: true,
+//             debug: true
+//         }
+//     }
+// }
 
 #[derive(Component)]
 pub struct NavmeshWater;
@@ -353,10 +353,10 @@ fn generate_terrain_navmesh(
     let settings = NavmeshSettings {
         filter: Some(hs),
         // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(5000.0, 300.0, 5000.0))),
-        walkable_climb: 8.0,
+        walkable_climb: 1.0,
         walkable_slope_angle: 55.0_f32.to_radians(),
-        agent_radius: 5.0,
-        agent_height: 10.0,
+        agent_radius: 0.5,
+        agent_height: 0.0,
         // min_region_size: 10,
         max_vertices_per_polygon: 20,
         max_simplification_error: 1.3,

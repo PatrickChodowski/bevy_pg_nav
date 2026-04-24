@@ -15,8 +15,7 @@ impl Plugin for PGNavDebugPlugin {
     fn build(&self, app: &mut App) {
         app
         .add_systems(OnEnter(GameState::Play), init)
-        .add_systems(Update, display_pointer)
-        .add_systems(Update, display_all)
+        .add_systems(Update, (display_pointer, display_all).run_if(resource_exists::<NavConfig>))
         ;
     }
 }

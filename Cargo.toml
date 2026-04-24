@@ -24,7 +24,8 @@ itertools = "0.13.0"
 smallvec = { version = "1.15", features = ["union", "const_generics","serde"] }
 ordered-float = "4.5.0"
 num-traits = "0.2.19"
-bevy_pg_core = {version="1.18.0", git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
+# bevy_pg_core = {version="1.18.0", git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
+bevy_pg_core = {path="../bevy_pg_core"}
 
 # rerecast = {path="../rerecast/crates/rerecast"}
 # avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
