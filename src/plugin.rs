@@ -303,26 +303,34 @@ fn generate_terrain_navmesh(
     trigger:             On<GenerateNavMesh>,
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
-    statics:             Query<(Entity, &NavStatic, &Name)>,
+    statics:             Query<(Entity, &Transform, &NavStatic, &Name)>,
+    terrains:            Query<(&Transform, &TerrainChunk)>,
     mut navmesh_handles: ResMut<RecastNavmeshHandles>
 ){
 
     info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
 
+    let Ok((terrain_transform, terrain)) = terrains.get(trigger.plane_entity) else {return};
+    let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
+
     // Start using plane entity
     let mut hs: HashSet<Entity> = HashSet::new();
     hs.insert(trigger.plane_entity);
 
-    for (entity, nstatic, name) in statics.iter(){
+
+    for (entity, transform, nstatic, name) in statics.iter(){
+
+        if !terrain_aabb.has_point(transform.translation.xz()){
+            continue;
+        }
+
         if (nstatic.typ == NavStaticType::Blocker) & ((name.contains("Bld")) | name.contains("Prop")) {
             hs.insert(entity);
         }
-    }
-
-    for (entity, nstatic, _name) in statics.iter(){
         if let NavStaticType::Navigable(a) = nstatic.typ {
             hs.insert(entity);
         }
+
     }
 
     // let mut count_blockers: usize = 0;
