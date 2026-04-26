@@ -14,7 +14,7 @@ use bevy_rerecast::{debug::DetailNavmeshGizmo, prelude::*};
 // use bevy_rerecast::Mesh3dBackendPlugin;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::{AABB, GameState, TerrainChunk, WaterChunk};
-use avian3d::collision::collider::ColliderConstructor;
+// use avian3d::collision::collider::ColliderConstructor;
 
 use crate::debug::PGNavDebugPlugin;
 use crate::water::{
@@ -44,7 +44,7 @@ impl Plugin for PGNavPlugin {
 
         .add_observer(prepare_colliders)
         .add_observer(generate_terrain_navmesh)
-        // .add_observer(generate_water_navmesh)
+        .add_observer(generate_water_navmesh)
         .add_observer(on_water_navmesh_sources_ready)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
@@ -262,7 +262,7 @@ fn on_water_navmesh_sources_ready(
 
 fn generate_water_navmesh(
     trigger:        On<GenerateNavMesh>,
-    terrains:       Query<(&Transform, &Mesh3d, &Name, &TerrainChunk)>,
+    terrains:       Query<(&Transform, &Mesh3d, Option<&Name>, &TerrainChunk)>,
     water_query:    Query<(&Transform, &WaterChunk)>,
     mut commands:   Commands,
     mut meshes:     ResMut<Assets<Mesh>>,
@@ -270,13 +270,20 @@ fn generate_water_navmesh(
     navconfig:      Res<NavConfig>
 ){
 
-    info!("Generate Water Navmesh 0");
+    let Ok((terrain_transform, mesh3d, maybe_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
+
+    if maybe_name.is_none(){
+        warn!("Plane needs a name before generating water navmesh");
+        return;
+    }
+
+    info!("Generate Water Navmesh for entity {}", trigger.plane_entity);
     let raycast_step = navconfig.raycast_step as usize;
     let extent: f32 = navconfig.raycast_step as f32 * 0.5;
     
-    let Ok((terrain_transform, mesh3d, _terrain_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
     let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
+     info!("3");
     let half_chunk_size: f32 = chunk.dims.x*0.5;
     let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
     let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
@@ -299,8 +306,13 @@ fn generate_water_navmesh(
         water_aabbs.push((water_aabb, water_transform.translation.y));
     }
 
+    info!("water aabbs: {:?}", water_aabbs);
+
     let mut water_hits = raycasts_rain(&xs, &zs, &trmd, &water_aabbs);
     let groups_map = group_waters(&mut water_hits, max_x, max_z);
+
+
+    info!("water hits count: {:?}", water_hits.len());
 
     // Order groups
     let mut hm_groups: HashMap<usize, Vec<WaterVertex>> = HashMap::new();
@@ -310,20 +322,33 @@ fn generate_water_navmesh(
 
     let mut triangle_map: HashMap<usize, Vec<[Vec3A; 3]>> = HashMap::new();
     for (group, vertices) in hm_groups.iter_mut(){
+        info!("group vertices count: {:?}", vertices.len());
         let mut vlocs: Vec<Vec3A> = order_boundary(vertices, max_x, max_z);
-        info!(" Group: {} Vertices count after order_boundary: {}", group, vertices.len());
+        info!(" Group: {} Vertices count after order_boundary: {}", group, vlocs.len());
         vlocs = remove_collinear(&mut vlocs);
-        info!(" Group: {} Vertices count after remove_collinear: {}", group, vertices.len());
+        info!("vlocs: {:?}", vlocs);
+        info!(" Group: {} Vertices count after remove_collinear: {}", group, vlocs.len());
         let triangles = triangulate(&mut vlocs);
+
+        info!("triangles: {:?}", triangles);
+
         let mesh = mesh_from_triangles(&triangles);
         triangle_map.insert(*group, triangles);
+
+        info!("mesh: {:?}", mesh);
+
+        // let trimesh_data = extract_trimesh(&mesh);
+        // info!("{:?}", trimesh_data);
+        // let collider = Collider::trimesh(trimesh_data.0, trimesh_data.1);
 
         commands.spawn(
             (
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(materials.add(StandardMaterial::from(Color::from(WHITE)))),
                 WaterNavmeshSource,
-                Visibility::Hidden
+                // Visibility::Hidden,
+                // collider,
+                // RigidBody::Static
             )
         );
     }
@@ -334,13 +359,19 @@ fn generate_water_navmesh(
 
 fn prepare_colliders(
     trigger:             On<GenerateNavMesh>,
-    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, Option<&Name>)>,
     meshes:              Res<Assets<Mesh>>,
     mut commands:        Commands,
 ){
     info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
 
-    let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.plane_entity) else {return};
+    let Ok((_terrain_transform, terrain, terrain_mesh, maybe_name)) = terrains.get(trigger.plane_entity) else {return};
+
+    if maybe_name.is_none(){
+        warn!("Plane needs a name before generating navmesh");
+        return;
+    }
+
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
     let heightfield = extract_heightfield(&mesh);
     // let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
@@ -387,7 +418,7 @@ fn generate_terrain_navmesh(
     // commands.entity(trigger.plane_entity).insert(collider);
 
     info!("[NAV] Generate terrain navmesh for entity2: {}", trigger.entity);
-    let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.entity) else {return};
+    let Ok((terrain_transform, terrain, _terrain_mesh)) = terrains.get(trigger.entity) else {return};
     let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
 
     // Start using plane entity
@@ -477,6 +508,7 @@ fn on_ready_navmesh(
                 commands.spawn(pgn.clone());
 
                 if navconfig.serialize {
+                    info!("Serializing navmesh to {}", pgn.filename());
                     IoTaskPool::get().spawn(async move {
                         let f = File::create(&pgn.filename()).ok().unwrap();
                         let mut writer = BufWriter::new(f);
@@ -549,29 +581,29 @@ fn extract_heightfield(mesh: &Mesh) -> Vec<Vec<f32>> {
 }
 
 
-// fn extract_trimesh(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
-//     // Extract vertices
-//     let Some(VertexAttributeValues::Float32x3(positions)) =
-//         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-//     else {
-//         return (vec![], vec![]);
-//     };
+fn extract_trimesh(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    // Extract vertices
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    else {
+        return (vec![], vec![]);
+    };
 
-//     let vertices: Vec<Vec3> = positions
-//         .iter()
-//         .map(|p| Vec3::new(p[0], p[1], p[2]))
-//         .collect();
+    let vertices: Vec<Vec3> = positions
+        .iter()
+        .map(|p| Vec3::new(p[0], p[1], p[2]))
+        .collect();
 
-//     // Extract indices
-//     let indices: Vec<[u32; 3]> = match mesh.indices() {
-//         Some(Indices::U32(idx)) => idx.chunks_exact(3)
-//             .map(|t| [t[0], t[1], t[2]])
-//             .collect(),
-//         Some(Indices::U16(idx)) => idx.chunks_exact(3)
-//             .map(|t| [t[0] as u32, t[1] as u32, t[2] as u32])
-//             .collect(),
-//         None => return (vec![], vec![]),
-//     };
+    // Extract indices
+    let indices: Vec<[u32; 3]> = match mesh.indices() {
+        Some(Indices::U32(idx)) => idx.chunks_exact(3)
+            .map(|t| [t[0], t[1], t[2]])
+            .collect(),
+        Some(Indices::U16(idx)) => idx.chunks_exact(3)
+            .map(|t| [t[0] as u32, t[1] as u32, t[2] as u32])
+            .collect(),
+        None => return (vec![], vec![]),
+    };
 
-//     (vertices, indices)
-// }
+    (vertices, indices)
+}
