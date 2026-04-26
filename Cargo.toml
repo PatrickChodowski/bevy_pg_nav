@@ -26,14 +26,18 @@ ordered-float = "4.5.0"
 num-traits = "0.2.19"
 # bevy_pg_core = {version="1.18.0", git="https://www.github.com/PatrickChodowski/bevy_pg_core"}
 bevy_pg_core = {path="../bevy_pg_core"}
-
-# rerecast = {path="../rerecast/crates/rerecast"}
-# avian_rerecast = {path="../rerecast/crates/avian_rerecast"}
-# bevy_rerecast = {path="../rerecast/crates/bevy_rerecast"}
+avian3d = {version = "0.6", default-features = false, features = [
+    "3d", 
+    "f32", 
+    "parry-f32", 
+    "collider-from-mesh"
+]}
 dashmap = {version="6.1.0", features = ["rayon"] }
 rayon = "1.11.0"
 earcutr = "0.5.0"
-avian_rerecast = "0.4.0"
-bevy_rerecast = "0.4.0"
-rerecast = "0.3.2"
-
+# avian_rerecast = "0.4.0"
+# bevy_rerecast = "0.4.0"
+# rerecast = "0.3.2"
+rerecast = {version = "0.3.2", path="../rerecast/crates/rerecast"}
+avian_rerecast = {version = "0.5.0-rc.3", path="../rerecast/crates/avian_rerecast"}
+bevy_rerecast = {version = "0.4.0", path="../rerecast/crates/bevy_rerecast"}

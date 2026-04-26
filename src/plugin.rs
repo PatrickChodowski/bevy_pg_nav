@@ -1,4 +1,8 @@
+use avian_rerecast::ColliderToTriMesh;
+use avian3d::prelude::{Collider, RigidBody};
+use bevy::mesh::{VertexAttributeValues, Indices};
 use bevy::color::palettes::css::WHITE;
+use bevy::math::bounding::Aabb3d;
 use serde::{Serialize, Deserialize};
 use bevy::tasks::IoTaskPool;
 use std::fs::File;
@@ -7,8 +11,10 @@ use bevy_common_assets::json::JsonAssetPlugin;
 use bevy::prelude::*;
 use bevy::platform::collections::{HashSet, HashMap};
 use bevy_rerecast::{debug::DetailNavmeshGizmo, prelude::*};
-use bevy_rerecast::Mesh3dBackendPlugin;
+// use bevy_rerecast::Mesh3dBackendPlugin;
+use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::{AABB, GameState, TerrainChunk, WaterChunk};
+use avian3d::collision::collider::ColliderConstructor;
 
 use crate::debug::PGNavDebugPlugin;
 use crate::water::{
@@ -27,8 +33,8 @@ impl Plugin for PGNavPlugin {
         app
         .add_plugins((
             NavmeshPlugins::default(),
-            Mesh3dBackendPlugin::default(),
-            // AvianBackendPlugin::default()
+            // Mesh3dBackendPlugin::default(),
+            AvianBackendPlugin::default()
         ))
         // .insert_resource(NavConfig::default())
         .init_asset::<PGNavmesh>()
@@ -36,14 +42,42 @@ impl Plugin for PGNavPlugin {
         .add_plugins(PGNavDebugPlugin)
         .insert_resource(RecastNavmeshHandles::default())
 
+        .add_observer(prepare_colliders)
         .add_observer(generate_terrain_navmesh)
         // .add_observer(generate_water_navmesh)
         .add_observer(on_water_navmesh_sources_ready)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
         .add_systems(OnExit(GameState::Play), clear)
+
+        .add_systems(Update, wait_for_colliders.run_if(resource_exists::<WaitColliders>))
         ;
     }
+}
+
+#[derive(Resource)]
+struct WaitColliders {
+    entity: Entity,
+    timer: Timer
+}
+
+#[derive(Event)]
+struct CollidersReady {
+    entity: Entity
+}
+
+fn wait_for_colliders(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut wait: ResMut<WaitColliders>
+){
+    wait.timer.tick(time.delta());
+
+    if wait.timer.is_finished(){
+        commands.trigger(CollidersReady{entity: wait.entity});
+        commands.remove_resource::<WaitColliders>();
+    }
+
 }
 
 fn clear(
@@ -160,8 +194,6 @@ pub struct NavmeshWater;
 #[derive(Component)]
 pub struct NavmeshTerrain;
 
-
-
 #[derive(Event)]
 pub struct GenerateNavMesh {
     pub plane_entity: Entity
@@ -243,15 +275,11 @@ fn generate_water_navmesh(
     let extent: f32 = navconfig.raycast_step as f32 * 0.5;
     
     let Ok((terrain_transform, mesh3d, _terrain_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
-    info!("Generate Water Navmesh 1");
     let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
-    info!("Generate Water Navmesh 2");
     let half_chunk_size: f32 = chunk.dims.x*0.5;
     let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
     let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
-
-    info!("Generate Water Navmesh 3");
     let loc = terrain_transform.translation;
 
     let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
@@ -304,23 +332,67 @@ fn generate_water_navmesh(
     
 }
 
-fn generate_terrain_navmesh(
+fn prepare_colliders(
     trigger:             On<GenerateNavMesh>,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    meshes:              Res<Assets<Mesh>>,
+    mut commands:        Commands,
+){
+    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
+
+    let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.plane_entity) else {return};
+    let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
+    let heightfield = extract_heightfield(&mesh);
+    // let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
+    let collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+
+    // let (vertices, indices) = extract_trimesh(&mesh);
+    // let collider = Collider::trimesh(vertices, indices);
+
+    // info!("Collider: {:?}", collider.shape_scaled());
+    commands.entity(trigger.plane_entity).insert((collider, RigidBody::Static));
+
+    commands.insert_resource(WaitColliders{entity: trigger.plane_entity, timer: Timer::from_seconds(0.5, TimerMode::Once)});
+}
+
+
+
+
+fn generate_terrain_navmesh(
+    // trigger:             On<GenerateNavMesh>,
+    // trigger: On<Add, Collider>,
+    trigger: On<CollidersReady>,
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
     statics:             Query<(Entity, &Transform, &NavStatic, &Name)>,
-    terrains:            Query<(&Transform, &TerrainChunk)>,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    meshes:              Res<Assets<Mesh>>,
     mut navmesh_handles: ResMut<RecastNavmeshHandles>
 ){
 
-    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
+    // info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
 
-    let Ok((terrain_transform, terrain)) = terrains.get(trigger.plane_entity) else {return};
+    // let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.plane_entity) else {return};
+    // let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
+    // let heightfield = extract_heightfield(&mesh);
+    // let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
+
+    // // commands.entity(trigger.plane_entity).insert(ColliderConstructor::TrimeshFromMesh)
+    // // let collider_constructor = ColliderConstructor::Heightfield { heights: heightfield, scale: Vec3::ONE };
+    // let collider = Collider::heightfield(heightfield, terrain_transform.scale);
+    // // let trimesh = collider.to_trimesh();
+
+    // // Collider::from(mesh);
+
+    // commands.entity(trigger.plane_entity).insert(collider);
+
+    info!("[NAV] Generate terrain navmesh for entity2: {}", trigger.entity);
+    let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.entity) else {return};
     let terrain_aabb = AABB::from_loc_dims(terrain_transform.translation.xz(), terrain.dims);
 
     // Start using plane entity
     let mut hs: HashSet<Entity> = HashSet::new();
-    hs.insert(trigger.plane_entity);
+    hs.insert(trigger.entity);
 
 
     for (entity, transform, nstatic, name) in statics.iter(){
@@ -363,6 +435,7 @@ fn generate_terrain_navmesh(
         // cell_size_fraction: 2.0,
         // cell_height_fraction: 4.0,
         up: Vec3::Y,
+        // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(terrain.dims.x * 0.5, 1.0, terrain.dims.y * 0.5))),
         // merge_region_size: 100,
 
         // min_region_size: // def: 8,
@@ -433,3 +506,72 @@ fn on_spawn_navmesh(
         }
     }
 }
+
+
+fn extract_heightfield(mesh: &Mesh) -> Vec<Vec<f32>> {
+    // Get vertex positions from the mesh
+    let Some(VertexAttributeValues::Float32x3(positions)) = 
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION) 
+    else {
+        return vec![];
+    };
+
+    // Collect unique X and Z values to determine grid dimensions
+    let mut x_coords: Vec<f32> = positions.iter().map(|p| p[0]).collect();
+    let mut z_coords: Vec<f32> = positions.iter().map(|p| p[2]).collect();
+
+    x_coords.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    x_coords.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    z_coords.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    z_coords.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    let rows = x_coords.len();
+    let cols = z_coords.len();
+
+    // Build a lookup: (x_index, z_index) -> y
+    let mut heights = vec![vec![0.0f32; cols]; rows];
+
+    for pos in positions.iter() {
+        let x = pos[0];
+        let y = pos[1];
+        let z = pos[2];
+
+        let xi = x_coords.partition_point(|&v| v < x - 1e-4);
+        let zi = z_coords.partition_point(|&v| v < z - 1e-4);
+
+        if xi < rows && zi < cols {
+            heights[xi][zi] = y;
+        }
+    }
+
+    heights
+}
+
+
+// fn extract_trimesh(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+//     // Extract vertices
+//     let Some(VertexAttributeValues::Float32x3(positions)) =
+//         mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+//     else {
+//         return (vec![], vec![]);
+//     };
+
+//     let vertices: Vec<Vec3> = positions
+//         .iter()
+//         .map(|p| Vec3::new(p[0], p[1], p[2]))
+//         .collect();
+
+//     // Extract indices
+//     let indices: Vec<[u32; 3]> = match mesh.indices() {
+//         Some(Indices::U32(idx)) => idx.chunks_exact(3)
+//             .map(|t| [t[0], t[1], t[2]])
+//             .collect(),
+//         Some(Indices::U16(idx)) => idx.chunks_exact(3)
+//             .map(|t| [t[0] as u32, t[1] as u32, t[2] as u32])
+//             .collect(),
+//         None => return (vec![], vec![]),
+//     };
+
+//     (vertices, indices)
+// }
