@@ -1,5 +1,6 @@
 use avian_rerecast::ColliderToTriMesh;
 use avian3d::prelude::{Collider, RigidBody};
+use bevy::light::NotShadowReceiver;
 use bevy::mesh::{VertexAttributeValues, Indices};
 use bevy::color::palettes::css::WHITE;
 use bevy::math::bounding::Aabb3d;
@@ -176,17 +177,7 @@ pub struct NavConfig {
     pub serialize: bool,
     pub debug: bool
 }
-// impl Default for NavConfig {
-//     fn default() -> Self {
-//         NavConfig{
-//             raycast_step: 10,
-//             offset_y: 1.0,
-//             iter_count_limit: 20,
-//             serialize: true,
-//             debug: true
-//         }
-//     }
-// }
+
 
 #[derive(Component)]
 pub struct NavmeshWater;
@@ -244,13 +235,13 @@ fn on_water_navmesh_sources_ready(
 
     let settings = NavmeshSettings {
         filter: Some(hs),
-        walkable_climb: 0.5,
-        walkable_slope_angle: 30.0_f32.to_radians(),
-        agent_radius: 5.0,
-        agent_height: 10.0,
+        walkable_climb: 10.0,
+        walkable_slope_angle: 0.1_f32.to_radians(),
+        agent_radius: 1.0,
+        agent_height: 2.0,
         max_vertices_per_polygon: 20,
         max_simplification_error: 1.3,
-        min_region_size: 100,
+        min_region_size: 1,
         up: Vec3::Y,
         ..default()
     };
@@ -277,25 +268,23 @@ fn generate_water_navmesh(
         return;
     }
 
-    info!("Generate Water Navmesh for entity {}", trigger.plane_entity);
-    let raycast_step = navconfig.raycast_step as usize;
-    let extent: f32 = navconfig.raycast_step as f32 * 0.5;
-    
+    info!("Generate Water Navmesh for entity {} raycast step: {}", trigger.plane_entity, navconfig.raycast_step);
+    // let raycast_step = navconfig.raycast_step as usize;
+    let raycast_step = 1;
     let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
-     info!("3");
-    let half_chunk_size: f32 = chunk.dims.x*0.5;
-    let safety_offset: f32 = navconfig.raycast_step as f32 *2.0;
-    let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
     let loc = terrain_transform.translation;
+    info!("terrain chunk dims: {} terrain loc: {}", chunk.dims, loc);
+    let chunk_half_dims: Vec2 = chunk.dims*0.5;
+    let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
 
-    let min_x = (loc.x - half_chunk_size - safety_offset - extent) as u32; // For Some reason in X I need to do it
-    let max_x = (loc.x + half_chunk_size + safety_offset) as u32;
-    let min_z = (loc.z - half_chunk_size - safety_offset) as u32;
-    let max_z = (loc.z + half_chunk_size + safety_offset) as u32;
+    let min_x = (loc.x - chunk_half_dims.x) as i32;
+    let max_x = (loc.x + chunk_half_dims.x) as i32;
+    let min_z = (loc.z - chunk_half_dims.y) as i32;
+    let max_z = (loc.z + chunk_half_dims.y) as i32;
 
-    let xs_u: Vec<u32> = (min_x..=max_x).step_by(raycast_step).collect();
-    let zs_u: Vec<u32> = (min_z..=max_z).step_by(raycast_step).collect();
+    let xs_u: Vec<i32> = (min_x..=max_x).step_by(raycast_step).collect();
+    let zs_u: Vec<i32> = (min_z..=max_z).step_by(raycast_step).collect();
 
     let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
     let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
@@ -306,13 +295,10 @@ fn generate_water_navmesh(
         water_aabbs.push((water_aabb, water_transform.translation.y));
     }
 
-    info!("water aabbs: {:?}", water_aabbs);
 
     let mut water_hits = raycasts_rain(&xs, &zs, &trmd, &water_aabbs);
-    let groups_map = group_waters(&mut water_hits, max_x, max_z);
-
-
-    info!("water hits count: {:?}", water_hits.len());
+    // Group waters already picks only boundary points
+    let groups_map = group_waters(&mut water_hits, xs_u.len() as i32 - 1, zs_u.len() as i32 - 1);
 
     // Order groups
     let mut hm_groups: HashMap<usize, Vec<WaterVertex>> = HashMap::new();
@@ -320,35 +306,53 @@ fn generate_water_navmesh(
         hm_groups.entry(vertex.group).or_insert(Vec::new()).push(*vertex);
     }
 
+    // info!("{:?}", hm_groups);
+
     let mut triangle_map: HashMap<usize, Vec<[Vec3A; 3]>> = HashMap::new();
     for (group, vertices) in hm_groups.iter_mut(){
-        info!("group vertices count: {:?}", vertices.len());
-        let mut vlocs: Vec<Vec3A> = order_boundary(vertices, max_x, max_z);
+        info!("group {} vertices count: {:?}", group, vertices.len());
+        let mut vlocs: Vec<Vec3A> = order_boundary(vertices, xs_u.len() as i32 - 1, zs_u.len() as i32 - 1);
+
         info!(" Group: {} Vertices count after order_boundary: {}", group, vlocs.len());
         vlocs = remove_collinear(&mut vlocs);
-        info!("vlocs: {:?}", vlocs);
         info!(" Group: {} Vertices count after remove_collinear: {}", group, vlocs.len());
-        let triangles = triangulate(&mut vlocs);
 
+
+        // for v in vlocs.iter(){
+        //     commands.spawn(
+        //         (
+        //             Mesh3d(meshes.add(Sphere::new(0.5))),
+        //             NotShadowReceiver,
+        //             MeshMaterial3d(materials.add(StandardMaterial {
+        //                 base_color: Color::WHITE,
+        //                 ..default()
+        //             })),
+        //             Transform::from_translation(Vec3::new(v.x, v.y, v.z)).with_scale(Vec3::splat(3.0)),
+        //         )
+        //     );
+        // }
+
+        let triangles = triangulate(&mut vlocs);
         info!("triangles: {:?}", triangles);
 
         let mesh = mesh_from_triangles(&triangles);
         triangle_map.insert(*group, triangles);
-
         info!("mesh: {:?}", mesh);
 
-        // let trimesh_data = extract_trimesh(&mesh);
-        // info!("{:?}", trimesh_data);
-        // let collider = Collider::trimesh(trimesh_data.0, trimesh_data.1);
+        let trimesh_data = extract_trimesh(&mesh);
+        info!("{:?}", trimesh_data);
+        let collider = Collider::trimesh(trimesh_data.0, trimesh_data.1);
+
+        info!("collider: {:?}", collider);
 
         commands.spawn(
             (
                 Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(materials.add(StandardMaterial::from(Color::from(WHITE)))),
                 WaterNavmeshSource,
-                // Visibility::Hidden,
-                // collider,
-                // RigidBody::Static
+                Visibility::Hidden,
+                collider,
+                RigidBody::Static
             )
         );
     }
@@ -402,6 +406,155 @@ fn generate_terrain_navmesh(
 ){
 
     // info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
+pub(crate) fn group_waters(
+    v_waters: &mut Vec<WaterVertex>, 
+    maxx: i32, 
+    maxz: i32
+) -> HashMap<(usize, usize), WaterVertex> {
+
+    let adjs: [(isize, isize); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1,-1), (1,1), (-1, 1), (1, -1)];
+    let max_x = maxx as isize;
+    let max_z = maxz as isize;
+
+    let mut group_map: HashMap<(usize, usize), WaterVertex> = v_waters.iter().map(|v| ((v.x_u, v.z_u), *v)).collect::<HashMap<(usize, usize), WaterVertex>>();
+    // let mut group: usize = 0;
+    let mut global_group: usize = 1;
+
+    for vertex in v_waters.iter(){
+        // info!("vertex: ({}, {})", vertex.x_u, vertex.z_u)
+
+        if group_map.get(&(vertex.x_u, vertex.z_u)).map_or(false, |v| v.group != 0) {
+            continue;
+        }
+
+        let mut local_group: Option<usize> = None;
+        for adj in adjs.iter() {
+            let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
+            if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
+                continue;
+            }
+            let u_key = (key.0 as usize, key.1 as usize);
+
+            if let Some(vertex) = group_map.get(&u_key){
+                if vertex.group != 0 {
+                    local_group = Some(vertex.group);
+                    break;
+                }
+            }
+        }
+
+        if local_group.is_none(){
+            local_group = Some(global_group);
+            global_group += 1;
+        }
+
+        if let Some(local_group) = local_group {
+
+            for adj in adjs.iter() {
+                let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
+                if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
+                    continue;
+                }
+
+                let u_key = (key.0 as usize, key.1 as usize);
+                if let Some(vertex) = group_map.get_mut(&u_key){
+                    vertex.group = local_group;
+                }
+            }
+
+            if let Some(vertex) = group_map.get_mut(&(vertex.x_u, vertex.z_u)){
+                vertex.group = local_group;
+            }
+        }
+    }
+
+    // info!("global_group: {}", global_group);
+
+
+    // 2nd pass
+    loop {
+        // let mut group_pairs: HashSet<(usize, usize)> = HashSet::new();
+        let mut group_pairs: HashMap<usize, usize> = HashMap::new(); // max_group -> min_group
+
+        // let mut used: HashSet<usize> = HashSet::new();
+
+        for (_tile, vertex) in group_map.iter(){
+            // if used.contains(&vertex.group){
+            //     continue;
+            // }
+
+            for adj in adjs.iter() {
+                let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
+                if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
+                    continue;
+                }
+                let u_key = (key.0 as usize, key.1 as usize);
+                if let Some(vertex2) = group_map.get(&u_key){
+                    // if used.contains(&vertex2.group){
+                    //     continue;
+                    // }
+
+                    if vertex2.group != vertex.group {
+                        let ming = vertex.group.min(vertex2.group);
+                        let maxg = vertex.group.max(vertex2.group);
+                        // group_pairs.insert((ming, maxg));
+                        group_pairs.entry(maxg).and_modify(|v| *v = (*v).min(ming)).or_insert(ming);
+                        // used.insert(ming);
+                        // used.insert(maxg);
+                    }
+                }
+            }
+        }
+        info!("2nd pass: group pairs len: {}", group_pairs.len());
+        // if group_pairs.len() == 0 {
+        //     break;
+        // }
+
+        if group_pairs.is_empty() {
+            break;
+        }
+        // for pair in group_pairs.iter(){
+        //     for (_tile, vertex) in group_map.iter_mut(){
+        //         if vertex.group == pair.1 {
+        //             vertex.group = pair.0;
+        //         }
+        //     }
+        // }
+        for (_tile, vertex) in group_map.iter_mut(){
+            if let Some(&target) = group_pairs.get(&vertex.group) {
+                vertex.group = target;
+            }
+        }
+    }
+
+    let unique_groups = group_map.iter().map(|v| v.1.group).collect::<HashSet<usize>>();
+    info!("unique_groups: {:?}", unique_groups);
+
+    // 3rd pass - keep only boundary points
+    let mut to_rm: Vec<(usize, usize)> = Vec::new();
+    for (tile, vertex) in group_map.iter(){
+        let mut adj_count: usize = 0;
+
+        for adj in adjs.iter() {
+            let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
+            if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
+                continue;
+            }
+            let u_key = (key.0 as usize, key.1 as usize);
+            if let Some(_vertex2) = group_map.get(&u_key){
+                adj_count += 1;
+            }
+        }
+        if adj_count == 8 {
+            to_rm.push(*tile);
+        }
+    }
+
+    for tile in to_rm.iter(){
+        group_map.remove(tile);
+    }
+    return group_map;
+}
 
     // let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(trigger.plane_entity) else {return};
     // let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};

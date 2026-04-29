@@ -66,6 +66,8 @@ pub(crate) fn raycasts_rain(
 
         let ray: NavRay = NavRay::down(x, z);
 
+
+
         // Check against the terrain
         if let Some((terrain_height, _group_id, _normal)) = trmd.test(&ray){
 
@@ -90,6 +92,7 @@ pub(crate) fn raycasts_rain(
             // }
 
             if let Some(water_height) = maybe_water_height {
+                // info!("water height: {} ray origin: {} ray dir: {}", water_height, ray.origin, ray.direction);
                 if terrain_height <= water_height {
                     let tile = (x_index, z_index);
                     let loc = Vec3A::new(x, water_height, z);
@@ -116,12 +119,16 @@ pub(crate) fn raycasts_rain(
 }
 
 
-
+// TODO: WHY FOR RAYCAST STEP = 1 it creates thousands of groups?
 pub(crate) fn group_waters(
     v_waters: &mut Vec<WaterVertex>, 
-    maxx: u32, 
-    maxz: u32
+    maxx: i32, 
+    maxz: i32
 ) -> HashMap<(usize, usize), WaterVertex> {
+
+    // and in group_waters, at the very start:
+    info!("maxx: {}, maxz: {}", maxx, maxz);
+    info!("sample vertices: {:?}", &v_waters[..5.min(v_waters.len())]);
 
     let adjs: [(isize, isize); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1,-1), (1,1), (-1, 1), (1, -1)];
     let max_x = maxx as isize;
@@ -134,7 +141,7 @@ pub(crate) fn group_waters(
     for vertex in v_waters.iter(){
         // info!("vertex: ({}, {})", vertex.x_u, vertex.z_u)
 
-        if vertex.group != 0 {
+        if group_map.get(&(vertex.x_u, vertex.z_u)).map_or(false, |v| v.group != 0) {
             continue;
         }
 
@@ -217,6 +224,7 @@ pub(crate) fn group_waters(
         if group_pairs.len() == 0 {
             break;
         }
+
         for pair in group_pairs.iter(){
             for (_tile, vertex) in group_map.iter_mut(){
                 if vertex.group == pair.1 {
@@ -254,6 +262,8 @@ pub(crate) fn group_waters(
     }
     return group_map;
 }
+
+
 
 
 pub(crate) fn mesh_from_triangles(
@@ -312,8 +322,7 @@ pub(crate) fn triangulate(
 pub(crate) fn remove_collinear(
     vlocs: &mut Vec<Vec3A>
 ) -> Vec<Vec3A> {
-    // 200, 400 looks good
-    let threshold: f32 = 1200.0; // Up to 1400 I saw
+    let threshold: f32 = 0.01;
     let mut result = vec![vlocs[0]];
 
     for i in 1..vlocs.len() {
@@ -331,10 +340,21 @@ pub(crate) fn remove_collinear(
         let v2x = p3.x - p1.x;
         let v2y = p3.z - p1.z;
         let cross = (v1x * v2y - v1y * v2x).abs();
+        let len_a = (v1x * v1x + v1y * v1y).sqrt();
+        let len_b = (v2x * v2x + v2y * v2y).sqrt();
+        if len_a < 1e-6 || len_b < 1e-6 {
+            continue; // degenerate segment, skip
+        }
 
-        if cross > threshold {
+        let normalized_cross = cross / (len_a * len_b);
+        if normalized_cross > threshold {
             result.push(p2);
         }
+
+        // info!("cross: {}", cross);
+        // if cross > threshold {
+        //     result.push(p2);
+        // }
     }
     result.push(vlocs[vlocs.len() - 1]);
 
@@ -344,8 +364,8 @@ pub(crate) fn remove_collinear(
 
 pub(crate) fn order_boundary(
     vertices: &mut Vec<WaterVertex>, 
-    maxx: u32, 
-    maxz: u32
+    maxx: i32, 
+    maxz: i32
 ) -> Vec<Vec3A>{
     let max_x: isize = maxx as isize;
     let max_z: isize = maxz as isize;
@@ -356,6 +376,7 @@ pub(crate) fn order_boundary(
 
     let mut current = vertices[0];
     new_order.push(current.loc);
+    used.insert((current.x_u, current.z_u));
     
     let madjs: [(isize, isize); 4] = [(1, 0), (0, 1), (0, -1), (-1, 0)];
     let dadjs: [(isize, isize); 4] = [(-1, -1), (1, 1), (1, -1), (-1, 1)];
@@ -366,7 +387,7 @@ pub(crate) fn order_boundary(
             let adj_x = current.x_u as isize + adj.0;
             let adj_z = current.z_u as isize + adj.1;
 
-            if (adj_x > 0) & (adj_x <= max_x) & (adj_z > 0) & (adj_z <= max_z){
+            if (adj_x >= 0) & (adj_x <= max_x) & (adj_z >= 0) & (adj_z <= max_z){
                 for v in vertices.iter(){
                     if used.contains(&(v.x_u, v.z_u)){
                         continue;
@@ -374,7 +395,7 @@ pub(crate) fn order_boundary(
 
                     if (adj_x as usize == v.x_u) & (adj_z as usize == v.z_u){
                         next = Some(*v);
-                        break;
+                        break; 
                     }
                 }
             }
@@ -402,15 +423,18 @@ pub(crate) fn order_boundary(
                     }
                 }
             }
-        }
-        if let Some(next) = next {
-            used.insert((current.x_u, current.z_u));
-            current = next;
-            new_order.push(current.loc);
-        } else {
-            break;
+
+            if let Some(next) = next {
+                used.insert((current.x_u, current.z_u));
+                current = next;
+                new_order.push(current.loc);
+            } else {
+                break;
+            }
+
         }
 
     }
+    // info!("new order: {:?}", new_order);
     return new_order;
 }
