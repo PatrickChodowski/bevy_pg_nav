@@ -30,6 +30,7 @@ fn prepare_terrain_colliders(
     terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, Option<&Name>)>,
     meshes:              Res<Assets<Mesh>>,
     mut commands:        Commands,
+    mut navmesh_handles: ResMut<RecastNavmeshHandles>
 ){
     info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
 
@@ -39,6 +40,8 @@ fn prepare_terrain_colliders(
         warn!("Plane needs a name before generating navmesh");
         return;
     }
+
+    navmesh_handles.name = maybe_name.unwrap().to_string();
 
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
     let heightfield = extract_heightfield(&mesh);

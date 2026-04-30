@@ -29,13 +29,13 @@ impl Plugin for PGWaterNavPlugin {
 }
 
 fn generate_water_navmesh(
-    trigger:        On<GenerateNavMesh>,
-    terrains:       Query<(&Transform, &Mesh3d, Option<&Name>, &TerrainChunk)>,
-    water_query:    Query<(&Transform, &WaterChunk)>,
-    mut commands:   Commands,
-    mut meshes:     ResMut<Assets<Mesh>>,
-    mut materials:  ResMut<Assets<StandardMaterial>>,
-    // navconfig:      Res<NavConfig>
+    trigger:                On<GenerateNavMesh>,
+    terrains:               Query<(&Transform, &Mesh3d, Option<&Name>, &TerrainChunk)>,
+    water_query:            Query<(&Transform, &WaterChunk)>,
+    mut commands:           Commands,
+    mut meshes:             ResMut<Assets<Mesh>>,
+    mut materials:          ResMut<Assets<StandardMaterial>>,
+    mut navmesh_handles:    ResMut<RecastNavmeshHandles>,
 ){
 
     let Ok((terrain_transform, mesh3d, maybe_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
@@ -44,6 +44,8 @@ fn generate_water_navmesh(
         warn!("Plane needs a name before generating water navmesh");
         return;
     }
+
+    navmesh_handles.name = maybe_name.unwrap().to_string();
 
     info!("Generate Water Navmesh for entity {}", trigger.plane_entity);
     // let raycast_step = navconfig.raycast_step as usize;

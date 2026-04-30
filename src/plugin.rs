@@ -182,6 +182,7 @@ fn on_ready_navmesh(
 ){
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
+    info!("On ready navmesh...");
 
     for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
         if let Some(navmesh_handle) = maybe_navmesh_handle {
@@ -201,16 +202,14 @@ fn on_ready_navmesh(
                 
                 commands.spawn(pgn.clone());
 
-                // if navconfig.serialize {
-                    info!("Serializing navmesh to {}", pgn.filename());
-                    IoTaskPool::get().spawn(async move {
-                        let f = File::create(&pgn.filename()).ok().unwrap();
-                        let mut writer = BufWriter::new(f);
-                        let _res = serde_json::to_writer(&mut writer, &pgn);
-                        let _res = writer.flush();
-                    })
-                    .detach();
-                // }
+                info!("Serializing navmesh to {}", pgn.filename());
+                IoTaskPool::get().spawn(async move {
+                    let f = File::create(&pgn.filename()).ok().unwrap();
+                    let mut writer = BufWriter::new(f);
+                    let _res = serde_json::to_writer(&mut writer, &pgn);
+                    let _res = writer.flush();
+                })
+                .detach();
             }
         }
     }
@@ -222,6 +221,7 @@ fn on_spawn_navmesh(
    navs:          Query<&PGNavmesh>
 ){
     if let Ok(navmesh) = navs.get(trigger.entity){
+        info!("Spawned navmesh of type: {:?} name: {}", navmesh.typ, navmesh.name);
         match navmesh.typ {
             PGNavmeshType::Terrain => {
                 commands.entity(trigger.entity).insert(NavmeshTerrain);
