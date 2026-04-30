@@ -56,7 +56,8 @@ fn generate_terrain_navmesh_on_colliders_ready(
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
     terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, &Name)>,
-    mut navmesh_handles: ResMut<RecastNavmeshHandles>
+    mut navmesh_handles: ResMut<RecastNavmeshHandles>,
+
 ){
 
     info!("[NAV] Generate terrain navmesh for entity: {}", trigger.entity);

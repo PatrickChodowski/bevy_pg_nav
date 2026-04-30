@@ -1,5 +1,6 @@
 
 use bevy::tasks::IoTaskPool;
+use avian3d::prelude::{Collider, RigidBody};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use bevy_common_assets::json::JsonAssetPlugin;
@@ -7,9 +8,9 @@ use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
 use bevy_rerecast::prelude::*;
 use avian_rerecast::AvianBackendPlugin;
-use bevy_pg_core::prelude::GameState;
+use bevy_pg_core::prelude::{GameState, TerrainChunk, WaterChunk};
 
-use crate::water::PGWaterNavPlugin;
+use crate::water::{PGWaterNavPlugin, WaterNavmeshSource};
 use crate::terrain::PGTerrainNavPlugin;
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
@@ -179,6 +180,8 @@ fn on_ready_navmesh(
     mut commands:        Commands,
     ass_nav:             Res<Assets<Navmesh>>,
     navmesh_handles:     Res<RecastNavmeshHandles>,
+    nav_colliders:       Query<Entity, Or<(With<TerrainChunk>, With<WaterNavmeshSource>)>>,
+    wms:                 Query<Entity, With<WaterNavmeshSource>>
 ){
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
@@ -210,6 +213,14 @@ fn on_ready_navmesh(
                     let _res = writer.flush();
                 })
                 .detach();
+
+                for nav_collider_entity in nav_colliders.iter(){
+                    commands.entity(nav_collider_entity).remove::<Collider>();
+                    commands.entity(nav_collider_entity).remove::<RigidBody>();
+                }
+                for water_nav_source_entity in wms.iter(){
+                    commands.entity(water_nav_source_entity).despawn();
+                }
             }
         }
     }
