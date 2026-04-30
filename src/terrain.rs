@@ -1,14 +1,126 @@
-use std::f32::EPSILON;
 
 use bevy::prelude::*;
 use bevy::mesh::{Indices, Mesh, VertexAttributeValues};
 use bevy::render::render_resource::PrimitiveTopology;
-use bevy::platform::collections::{HashMap, HashSet};
+use bevy::platform::collections::HashSet;
+use avian3d::prelude::{Collider, RigidBody};
+use bevy_rerecast::debug::DetailNavmeshGizmo;
+use bevy_rerecast::generator::NavmeshGenerator;
+use bevy_rerecast::NavmeshSettings;
 
+use bevy_pg_core::prelude::TerrainChunk;
+use crate::prelude::{GenerateNavMesh, PGNavmeshType};
+use crate::plugin::{CollidersReady, RecastNavmeshHandles, WaitColliders};
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
-// use crate::triangles::NavPolygon;
-// use crate::types::NavType;
-// use crate::types::Neighbours;
+
+
+pub struct PGTerrainNavPlugin;
+
+impl Plugin for PGTerrainNavPlugin {
+    fn build(&self, app: &mut App) {
+        app
+        .add_observer(prepare_terrain_colliders)
+        .add_observer(generate_terrain_navmesh_on_colliders_ready)
+        ;
+    }
+}
+
+fn prepare_terrain_colliders(
+    trigger:             On<GenerateNavMesh>,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, Option<&Name>)>,
+    meshes:              Res<Assets<Mesh>>,
+    mut commands:        Commands,
+){
+    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
+
+    let Ok((_terrain_transform, terrain, terrain_mesh, maybe_name)) = terrains.get(trigger.plane_entity) else {return};
+
+    if maybe_name.is_none(){
+        warn!("Plane needs a name before generating navmesh");
+        return;
+    }
+
+    let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
+    let heightfield = extract_heightfield(&mesh);
+    let collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+    commands.entity(trigger.plane_entity).insert((collider, RigidBody::Static));
+    commands.insert_resource(WaitColliders{entity: trigger.plane_entity, timer: Timer::from_seconds(0.5, TimerMode::Once)});
+}
+
+
+fn generate_terrain_navmesh_on_colliders_ready(
+    trigger:             On<CollidersReady>,
+    mut generator:       NavmeshGenerator,
+    mut commands:        Commands,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    mut navmesh_handles: ResMut<RecastNavmeshHandles>
+){
+
+    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.entity);
+    let Ok((_terrain_transform, _terrain, _terrain_mesh)) = terrains.get(trigger.entity) else {return};
+    let mut hs: HashSet<Entity> = HashSet::new();
+    hs.insert(trigger.entity);
+
+
+    // for (entity, transform, nstatic, name) in statics.iter(){
+
+    //     if !terrain_aabb.has_point(transform.translation.xz()){
+    //         continue;
+    //     }
+
+    //     if (nstatic.typ == NavStaticType::Blocker) & ((name.contains("Bld")) | name.contains("Prop")) {
+    //         hs.insert(entity);
+    //     }
+    //     if let NavStaticType::Navigable(a) = nstatic.typ {
+    //         hs.insert(entity);
+    //     }
+
+    // }
+
+    // let mut count_blockers: usize = 0;
+    // for (entity, nstatic, name) in statics.iter(){
+    //     if (nstatic.typ == NavStaticType::Blocker) & (name.contains("Tree")) {
+    //         hs.insert(entity);
+    //         count_blockers += 1;
+    //     }
+    //     if count_blockers >= 1600 {
+    //         info!("Blockers limit reached");
+    //         break;
+    //     }
+    // }
+
+    let settings = NavmeshSettings {
+        filter: Some(hs),
+        walkable_climb: 1.0,
+        walkable_slope_angle: 55.0_f32.to_radians(),
+        agent_radius: 0.5,
+        agent_height: 0.0,
+        // min_region_size: 10,
+        max_vertices_per_polygon: 20,
+        max_simplification_error: 1.3,
+        // cell_size_fraction: 2.0,
+        // cell_height_fraction: 4.0,
+        up: Vec3::Y,
+        // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(terrain.dims.x * 0.5, 1.0, terrain.dims.y * 0.5))),
+        // merge_region_size: 100,
+
+        // min_region_size: // def: 8,
+        // merge_region_size: // def: 20,
+        // detail_sample_dist: 12.0, //def: 6.0
+        // detail_sample_max_error: 10.0, //def 1.0
+        // contour_flags: BuildContoursFlags::TESSELLATE_AREA_EDGES,
+        ..default()
+    };
+    let navmesh = generator.generate(settings);
+    commands.spawn(DetailNavmeshGizmo::new(&navmesh));
+    navmesh_handles.data.insert(PGNavmeshType::Terrain, Some(navmesh));
+}
+
+
+
+
+
+
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone, Component)]
@@ -19,7 +131,6 @@ pub struct TerrainRayMeshData {
     triangle_count:            usize,
     pub vertices:              Vec<Vec3A>,
     pub edges:                 HashSet<(usize, usize)>,
-    // quads_mapping:             HashMap<usize, usize> // Pairs of triangles that are making a quad
 }
 impl TerrainRayMeshData {
     pub(crate)  fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
@@ -120,47 +231,17 @@ impl TerrainRayMeshData {
             panic!("No indices in terrain");
         }
 
-
         let vertices: Vec<Vec3A> = vertex_positions.iter().map(|v| Vec3A::new(v[0], v[1], v[2])).collect::<Vec<Vec3A>>();
 
         let triangle_count = tri_pos.len();
-        let mut trmd =  TerrainRayMeshData{
+        let trmd =  TerrainRayMeshData{
             mesh_transform: mesh_transform.inverse(),
             triangle_vertex_positions: tri_pos,
             triangle_normals: tri_norm,
             triangle_count,
             vertices,
             edges,
-            // quads_mapping: HashMap::new()
         };
-
-        // trmd.map_quads();
-
-        // for a_tri in 0..trmd.triangle_count {
-        //     let positions = trmd.vertex_positions[a_tri];
-        //     for pos in positions.iter(){
-        //         if pos.y >= 210.0 {
-        //             info!("Above 210: {} normal: {} mapping: {:?} positions: {:?}", a_tri, trmd.normal(a_tri), trmd.quads_mapping.get(&a_tri), positions);
-        //             break;
-        //         }
-        //     }
-        // }
-
-        // Looks like its only an issue for edges of the mesh?
-        // for a_tri in 0..trmd.triangle_count {
-        //     if !trmd.quads_mapping.contains_key(&a_tri) {
-        //         // info!("Triangle not in mapping: {}, norma: {:?}, pos: {:?}, is_right: {}", a_tri, trmd.normal(a_tri), trmd.positions(a_tri), trmd.is_right(a_tri));
-        //         // hmmm
-        //         trmd.quads_mapping.insert(a_tri, a_tri);
-
-        //     }
-        // }
-
-        // info!("[NAVMESH][TERRAIN] Count of Mapped triangles: {}, groups: {}, mesh triangle count: {}", 
-        //     trmd.quads_mapping.len(),
-        //     trmd.quads_mapping.len()/2,
-        //     triangle_count
-        // );
 
         return trmd;
 
@@ -194,50 +275,6 @@ impl TerrainRayMeshData {
     //     return polys;
     // }
 
-
-    fn map_quads(&mut self){
-        let mut quads_mapping: HashMap<usize, usize> = HashMap::with_capacity(self.triangle_count);
-
-        for a_tri in 0..self.triangle_count{
-
-            if quads_mapping.contains_key(&a_tri){
-                continue;
-            }
-            if !self.is_right(a_tri){
-                continue;
-            }
-            let a_points: [Vec3A; 2] = self.get_longest_side_points(a_tri);
-
-            for b_tri in 0..self.triangle_count{
-
-                if a_tri == b_tri {
-                    continue;
-                }
-                if quads_mapping.contains_key(&b_tri){
-                    continue;
-                }
-                if !self.is_right(b_tri){
-                    continue;
-                }
-                let b_points: [Vec3A; 2] = self.get_longest_side_points(b_tri);
-
-                if self.triangle_normal(a_tri) != self.triangle_normal(b_tri) {
-                    continue;
-                }
-
-                if ((a_points[0] == b_points[0]) & (a_points[1] == b_points[1])) |
-                   ((a_points[0] == b_points[1]) & (a_points[1] == b_points[0])) {
-
-                    let index = a_tri.min(b_tri);
-                    quads_mapping.insert(a_tri, index);
-                    quads_mapping.insert(b_tri, index);
-
-                }
-            }
-        }
-        // self.quads_mapping = quads_mapping;
-    }
-
     fn triangle_normal(&self, triangle_id: usize) -> Vec3A {
         return self.triangle_normals[triangle_id]
     }
@@ -247,49 +284,49 @@ impl TerrainRayMeshData {
         return self.triangle_vertex_positions[triangle_id]
     }
 
-    fn get_longest_side_points(&self, triangle_id: usize) -> [Vec3A; 2] {
+    // fn get_longest_side_points(&self, triangle_id: usize) -> [Vec3A; 2] {
 
-        let tri_pos = self.triangle(triangle_id).unwrap();
+    //     let tri_pos = self.triangle(triangle_id).unwrap();
         
-        let v0 = tri_pos[0];
-        let v1 = tri_pos[1];
-        let v2 = tri_pos[2];
+    //     let v0 = tri_pos[0];
+    //     let v1 = tri_pos[1];
+    //     let v2 = tri_pos[2];
 
-        let edges: [(Vec3A, Vec3A, f32); 3] = [
-            (v0, v1, (v1[0] - v0[0]).powi(2) + (v1[2] - v0[2]).powi(2)),
-            (v1, v2, (v2[0] - v1[0]).powi(2) + (v2[2] - v1[2]).powi(2)),
-            (v2, v0, (v0[0] - v2[0]).powi(2) + (v0[2] - v2[2]).powi(2)),
-        ];
+    //     let edges: [(Vec3A, Vec3A, f32); 3] = [
+    //         (v0, v1, (v1[0] - v0[0]).powi(2) + (v1[2] - v0[2]).powi(2)),
+    //         (v1, v2, (v2[0] - v1[0]).powi(2) + (v2[2] - v1[2]).powi(2)),
+    //         (v2, v0, (v0[0] - v2[0]).powi(2) + (v0[2] - v2[2]).powi(2)),
+    //     ];
 
-        let longest_edge: [Vec3A; 2] = edges.into_iter()
-            .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(v1, v2, _)| [v1, v2])
-            .unwrap();
+    //     let longest_edge: [Vec3A; 2] = edges.into_iter()
+    //         .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+    //         .map(|(v1, v2, _)| [v1, v2])
+    //         .unwrap();
 
-        return longest_edge;
-    }
+    //     return longest_edge;
+    // }
 
-    fn is_right(&self, triangle_id: usize) -> bool{
+    // fn is_right(&self, triangle_id: usize) -> bool{
 
-        let tri_pos = self.triangle(triangle_id).unwrap();
-        let v0 = tri_pos[0];
-        let v1 = tri_pos[1];
-        let v2 = tri_pos[2];
+    //     let tri_pos = self.triangle(triangle_id).unwrap();
+    //     let v0 = tri_pos[0];
+    //     let v1 = tri_pos[1];
+    //     let v2 = tri_pos[2];
 
-        let mut sides: [f32; 3] = [
-            (v1[0] - v0[0]).powi(2) + (v1[2] - v0[2]).powi(2),
-            (v2[0] - v1[0]).powi(2) + (v2[2] - v1[2]).powi(2),
-            (v0[0] - v2[0]).powi(2) + (v0[2] - v2[2]).powi(2),
-        ];
+    //     let mut sides: [f32; 3] = [
+    //         (v1[0] - v0[0]).powi(2) + (v1[2] - v0[2]).powi(2),
+    //         (v2[0] - v1[0]).powi(2) + (v2[2] - v1[2]).powi(2),
+    //         (v0[0] - v2[0]).powi(2) + (v0[2] - v2[2]).powi(2),
+    //     ];
 
-        sides.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    //     sides.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let s0 = sides[0];
-        let s1 = sides[1];
-        let s2 = sides[2];
+    //     let s0 = sides[0];
+    //     let s1 = sides[1];
+    //     let s2 = sides[2];
 
-        return (s0 + s1) - s2 <= EPSILON;
-    }
+    //     return (s0 + s1) - s2 <= EPSILON;
+    // }
 
     // Tests against all triangles of the mesh
     pub fn ray_intersection(
@@ -311,10 +348,6 @@ impl TerrainRayMeshData {
             if let Some(ray_hit) = ray_triangle_intersection(&mesh_space_ray, &tri_vertices) {
 
                 if ray_hit.distance > 0.0 {
-                    // let u = ray_hit.uv_coords().0;
-                    // let v = ray_hit.uv_coords().1;
-                    // let w = 1.0 - u - v;
-                    // let normal: Vec3 = (tri_normals * u + tri_normals * v + tri_normals * w).into();
                     let intersection = IntersectionData::new(
                         self.mesh_transform.transform_point3(ray_hit.position),
                         self.mesh_transform.transform_vector3(tri_normal.into()),
@@ -337,4 +370,46 @@ fn triangle_normal(
     n_a: &Vec3A, n_b: &Vec3A, n_c: &Vec3A
 ) -> Vec3A {
     (n_a + n_b + n_c).normalize()
+}
+
+
+#[allow(dead_code)]
+fn extract_heightfield(mesh: &Mesh) -> Vec<Vec<f32>> {
+    // Get vertex positions from the mesh
+    let Some(VertexAttributeValues::Float32x3(positions)) = 
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION) 
+    else {
+        return vec![];
+    };
+
+    // Collect unique X and Z values to determine grid dimensions
+    let mut x_coords: Vec<f32> = positions.iter().map(|p| p[0]).collect();
+    let mut z_coords: Vec<f32> = positions.iter().map(|p| p[2]).collect();
+
+    x_coords.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    x_coords.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    z_coords.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    z_coords.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    let rows = x_coords.len();
+    let cols = z_coords.len();
+
+    // Build a lookup: (x_index, z_index) -> y
+    let mut heights = vec![vec![0.0f32; cols]; rows];
+
+    for pos in positions.iter() {
+        let x = pos[0];
+        let y = pos[1];
+        let z = pos[2];
+
+        let xi = x_coords.partition_point(|&v| v < x - 1e-4);
+        let zi = z_coords.partition_point(|&v| v < z - 1e-4);
+
+        if xi < rows && zi < cols {
+            heights[xi][zi] = y;
+        }
+    }
+
+    heights
 }

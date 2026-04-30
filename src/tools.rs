@@ -2,7 +2,7 @@ use bevy::prelude::{Vec3A, Vec3};
 use bevy::math::Ray3d;
 use std::f32::EPSILON;
 
-use crate::plugin::ORIGIN_HEIGHT;
+// use crate::plugin::ORIGIN_HEIGHT;
 
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub struct NavRay {
@@ -29,7 +29,7 @@ impl NavRay {
     }
 
     pub fn down(x: f32, z: f32) -> Self {
-        let origin = Vec3::new(x, ORIGIN_HEIGHT, z);
+        let origin = Vec3::new(x, 1000.0, z);
         let dir = Vec3::NEG_Y;
         NavRay {
             origin: origin.into(),

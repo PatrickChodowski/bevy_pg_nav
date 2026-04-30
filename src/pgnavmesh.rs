@@ -5,7 +5,6 @@ use bevy_pg_core::prelude::AABB;
 
 use crate::bvh::{BVH, BHVType, BVHNode, aabb_intersects_triangle};
 use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
-use crate::plugin::ORIGIN_HEIGHT;
 use crate::types::{PGPolygon, PGVertex};
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize)]
@@ -53,7 +52,7 @@ impl PGNavmesh {
 
                         }
                     }
-                    BHVType::Branch(aabbs) => {}
+                    BHVType::Branch(_aabbs) => {}
                 }
             }
         };
@@ -61,7 +60,8 @@ impl PGNavmesh {
     }
 
     pub fn has_point(&self, loc: &Vec2) -> Option<(&PGPolygon, Vec3)> {
-        let origin: Vec3 = Vec3::new(loc.x, ORIGIN_HEIGHT, loc.y);
+        // used 1000.0 as origin height but I dont want to store it
+        let origin: Vec3 = Vec3::new(loc.x, 1000.0, loc.y);
         let direction: Vec3 = Vec3::NEG_Y;
         return self.ray_intersection(&origin, &direction);
     }
@@ -97,8 +97,6 @@ impl PGNavmesh {
 
         return (Vec3::new(closest_point.x, height, closest_point.y), best_poly_index);
     }
-
-
 
     pub fn path_points(
         &self, 
@@ -578,7 +576,6 @@ impl PGNavmesh {
 }
 
 
-
 // Search for the point in query of navmeshes
 pub fn find_point<'a>(
     point:     &Vec2, 
@@ -609,13 +606,14 @@ pub fn find_point<'a>(
 }
 
 
-
 fn closest_point_on_segment_2d(p: Vec2, a: Vec2, b: Vec2) -> Vec2 {
     let ab = b - a;
     let t = (p - a).dot(ab) / ab.length_squared();
     let t_clamped = t.clamp(0.0, 1.0);
     a + ab * t_clamped
 }
+
+
 /// Checks if a 2D point is inside a 2D triangle
 fn is_point_in_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
     let v0 = c - a;
@@ -634,6 +632,7 @@ fn is_point_in_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
 
     (u >= 0.0) && (v >= 0.0) && (u + v <= 1.0)
 }
+
 
 /// Finds the closest point on a 2D triangle to a 2D point
 fn closest_point_on_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
