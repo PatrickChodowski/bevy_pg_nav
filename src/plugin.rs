@@ -156,7 +156,8 @@ pub struct GenerateNavMesh {
 
 #[derive(Resource, Debug)]
 pub (crate) struct RecastNavmeshHandles {
-    pub(crate) data: HashMap<PGNavmeshType, Option<Handle<Navmesh>>>
+    pub(crate) data: HashMap<PGNavmeshType, Option<Handle<Navmesh>>>,
+    pub(crate) name: String // needs to be passed here
 }
 impl Default for RecastNavmeshHandles {
     fn default() -> Self {
@@ -166,7 +167,8 @@ impl Default for RecastNavmeshHandles {
                     (PGNavmeshType::Terrain, None),
                     (PGNavmeshType::Water, None)
                 ]
-            )
+            ),
+            name: "test".to_string()
         }
     }
 }
@@ -176,7 +178,6 @@ fn on_ready_navmesh(
     trigger:             On<NavmeshReady>,
     mut commands:        Commands,
     ass_nav:             Res<Assets<Navmesh>>,
-    // navconfig:           Res<NavConfig>,
     navmesh_handles:     Res<RecastNavmeshHandles>,
 ){
 
@@ -190,6 +191,8 @@ fn on_ready_navmesh(
                     recast_navmesh,
                     navmesh_type
                 );
+
+                pgn.name = navmesh_handles.name.clone();
 
                 // pgn.cleanup_lower();
                 pgn.reorder_vertex_polygons();

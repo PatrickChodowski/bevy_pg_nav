@@ -52,12 +52,12 @@ fn generate_terrain_navmesh_on_colliders_ready(
     trigger:             On<CollidersReady>,
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
-    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, &Name)>,
     mut navmesh_handles: ResMut<RecastNavmeshHandles>
 ){
 
     info!("[NAV] Generate terrain navmesh for entity: {}", trigger.entity);
-    let Ok((_terrain_transform, _terrain, _terrain_mesh)) = terrains.get(trigger.entity) else {return};
+    let Ok((_terrain_transform, _terrain, _terrain_mesh, terrain_name)) = terrains.get(trigger.entity) else {return};
     let mut hs: HashSet<Entity> = HashSet::new();
     hs.insert(trigger.entity);
 
@@ -114,6 +114,7 @@ fn generate_terrain_navmesh_on_colliders_ready(
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navmesh_handles.data.insert(PGNavmeshType::Terrain, Some(navmesh));
+    navmesh_handles.name = terrain_name.to_string();
 }
 
 
