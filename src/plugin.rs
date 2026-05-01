@@ -7,8 +7,10 @@ use bevy_common_assets::json::JsonAssetPlugin;
 use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
 use bevy_rerecast::prelude::*;
+use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::{GameState, TerrainChunk};
+
 
 use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
@@ -21,7 +23,8 @@ pub struct PGNavPlugin{
 
 #[derive(Resource)]
 pub(crate) struct NavResources {
-    pub(crate) colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+    pub(crate) colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>,
+    pub(crate) visible: bool
 }
 
 impl Plugin for PGNavPlugin {
@@ -35,12 +38,17 @@ impl Plugin for PGNavPlugin {
             PGTerrainNavPlugin,
             PGWaterNavPlugin
         ))
-        .insert_resource(NavResources{colliders_mapping: self.colliders_mapping})
+        .insert_resource(NavResources{
+            colliders_mapping: self.colliders_mapping,
+            visible: false
+        })
+        .insert_resource(NavHandlesHolders::new())
         .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
         .add_systems(Update, check_navgendata.run_if(resource_exists_and_changed::<NavmeshGenerationData>))
         .add_systems(OnExit(GameState::Play), clear)
+        .add_systems(Update, toggle_visibility) //.run_if(resource_changed::<NavResources>))
         ;
     }
 }
@@ -69,11 +77,11 @@ fn check_navgendata(
     navgendata:     Res<NavmeshGenerationData>,
     mut commands:   Commands,
     nav_colliders:  Query<Entity, Or<(With<TerrainChunk>, With<NavStatic>)>>,
-    water_sources:   Query<Entity, With<WaterNavmeshSource>>
+    water_sources:  Query<Entity, With<WaterNavmeshSource>>,
+    mut handles:    ResMut<NavHandlesHolders>
 ){
 
     let mut dones: usize = 0;
-
     for (_navtype, navstate) in navgendata.recast_handles.iter(){
         if navstate.1 {
             dones += 1;
@@ -82,7 +90,12 @@ fn check_navgendata(
     if dones == navgendata.recast_handles.len(){
         info!("Cleaning up after navmesh generation");
 
-        // commands.remove_resource::<NavmeshGenerationData>();
+        handles.clear();
+        for (_typ, recast_handle) in navgendata.recast_handles.iter(){
+            handles.add(recast_handle.0.as_ref().unwrap().clone());
+        }
+
+        commands.remove_resource::<NavmeshGenerationData>();
 
         for entity in nav_colliders.iter(){
             commands.entity(entity).remove::<Collider>();
@@ -174,6 +187,23 @@ impl NavmeshGenerationData {
 }
 
 
+#[derive(Resource, Debug)]
+pub (crate) struct NavHandlesHolders {
+   pub (crate) data: Vec<Handle<Navmesh>>
+}
+impl NavHandlesHolders {
+    fn new() -> Self {
+        NavHandlesHolders{data: Vec::new()}
+    }
+    fn add(&mut self, handle: Handle<Navmesh>){
+        self.data.push(handle);
+    }
+    fn clear(&mut self){
+        self.data.clear();
+    }
+}
+
+
 
 fn on_ready_navmesh(
     trigger:        On<NavmeshReady>,
@@ -231,6 +261,23 @@ fn on_spawn_navmesh(
             PGNavmeshType::Water => {
                 commands.entity(trigger.entity).insert(NavmeshWater);
             }
+        }
+    }
+}
+
+
+fn toggle_visibility(
+    navres:       Res<NavResources>,
+    mut query:    Query<(Entity, &mut Visibility), With<DetailNavmeshGizmo>>
+){
+
+    if navres.visible {
+        for (_entity, mut vis) in query.iter_mut(){
+            *vis = Visibility::Inherited;
+        }
+    } else {
+        for (_entity, mut vis) in query.iter_mut(){
+            *vis = Visibility::Hidden;
         }
     }
 }
