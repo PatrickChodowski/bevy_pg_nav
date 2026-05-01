@@ -13,7 +13,7 @@ pub mod prelude {
     // pub use crate::debug::display_polygon;
     pub use crate::pathfinding::{Path, PathFinder, SearchStep};
     pub use crate::plugin::{
-        GenerateNavMesh, PGNavPlugin, NavmeshTerrain, NavmeshWater
+        GenerateNavMesh, PGNavPlugin, NavmeshTerrain, NavmeshWater, NavStatic, NavStaticType
     };
     pub use crate::terrain::TerrainRayMeshData;
     pub use crate::types::{PGPolygon, PGVertex};

@@ -15,7 +15,14 @@ use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
-pub struct PGNavPlugin;
+pub struct PGNavPlugin{
+    pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+}
+
+#[derive(Resource)]
+pub(crate) struct NavResources {
+    pub(crate) colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+}
 
 impl Plugin for PGNavPlugin {
     fn build(&self, app: &mut App) {
@@ -28,6 +35,7 @@ impl Plugin for PGNavPlugin {
             PGTerrainNavPlugin,
             PGWaterNavPlugin
         ))
+        .insert_resource(NavResources{colliders_mapping: self.colliders_mapping})
         .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
@@ -102,17 +110,26 @@ fn clear(
 
 }
 
-// #[derive(Debug, PartialEq, Copy, Clone)]
-// pub enum NavStaticType {
-//     Navigable(f32), // Yoffset
-//     Blocker
-// }
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum NavStaticType {
+    Navigable(f32), // Yoffset
+    Blocker
+}
 
-// #[derive(Component, Clone, Copy)]
-// pub struct NavStatic {
-//     pub typ:    NavStaticType,
-//     pub shape:  NavStaticShape
-// }
+#[derive(Component, Clone, Copy)]
+pub struct NavStatic {
+    pub typ:    NavStaticType
+}
+impl NavStatic {
+    pub fn blocker() -> Self {
+        NavStatic{typ: NavStaticType::Blocker}
+    }
+    pub fn navigable() -> Self {
+        NavStatic{typ: NavStaticType::Navigable(0.0)}
+    }
+}
+
+
 // impl NavStatic {
 //     pub fn navigable_rect(
 //         x: f32, 
@@ -155,24 +172,6 @@ fn clear(
 
 // }
 
-// #[derive(Debug, Clone, Copy)]
-// pub enum NavStaticShape {
-//     Circle(f32), // radius
-//     Rect(Vec2)  // Dimensions
-// }
-
-// impl NavStaticShape {
-//     pub fn circle( 
-//         radius: f32
-//     ) -> Self {
-//         NavStaticShape::Circle(radius)
-//     }
-//     pub fn rect(
-//         dims: Vec2
-//     ) -> Self {
-//         NavStaticShape::Rect(dims)
-//     }
-// }
 
 #[derive(Component)]
 pub struct NavmeshWater;
