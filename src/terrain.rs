@@ -10,7 +10,8 @@ use bevy_rerecast::NavmeshSettings;
 
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::pgnavmesh::PGNavmeshType;
-use crate::plugin::NavmeshGenerationData;
+use crate::plugin::{NavResources, NavmeshGenerationData};
+use crate::plugin::NavStatic;
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 
@@ -33,15 +34,25 @@ pub(crate) struct GenerateTerrainNavmesh;
 fn prepare_terrain_colliders(
     _trigger:       On<GenerateTerrainNavmesh>,
     terrains:       Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    statics:        Query<(Entity, &Transform, &Name), With<Mesh3d>>,
     meshes:         Res<Assets<Mesh>>,
     mut commands:   Commands,
-    navgendata:     Res<NavmeshGenerationData>
+    navgendata:     Res<NavmeshGenerationData>,
+    navres:         Res<NavResources>
 ){
     let Ok((_terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
     info!("[NAV] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let heightfield = extract_heightfield(&mesh);
     let collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+
+    for (static_entity, static_transform, static_name) in statics.iter(){
+        if let Some((collider, nav_object)) = (navres.colliders_mapping)(static_name.to_string()){
+            info!("Inserting collider for {}", static_name);
+            commands.entity(static_entity).insert((collider, RigidBody::Static, nav_object));
+        }
+    }
+
     commands.entity(navgendata.plane_entity).insert((collider, RigidBody::Static));
     commands.insert_resource(WaitColliders::new());
 }
@@ -75,10 +86,11 @@ fn wait_for_colliders(
 
 
 fn generate_terrain_navmesh_on_colliders_ready(
-    _trigger:        On<CollidersReady>,
+    _trigger:       On<CollidersReady>,
     mut generator:  NavmeshGenerator,
     mut commands:   Commands,
     mut navgendata: ResMut<NavmeshGenerationData>,
+    navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
 
 ){
 
@@ -86,43 +98,19 @@ fn generate_terrain_navmesh_on_colliders_ready(
     let mut hs: HashSet<Entity> = HashSet::new();
     hs.insert(navgendata.plane_entity);
 
-
-    // for (entity, transform, nstatic, name) in statics.iter(){
-
-    //     if !terrain_aabb.has_point(transform.translation.xz()){
-    //         continue;
-    //     }
-
-    //     if (nstatic.typ == NavStaticType::Blocker) & ((name.contains("Bld")) | name.contains("Prop")) {
-    //         hs.insert(entity);
-    //     }
-    //     if let NavStaticType::Navigable(a) = nstatic.typ {
-    //         hs.insert(entity);
-    //     }
-
-    // }
-
-    // let mut count_blockers: usize = 0;
-    // for (entity, nstatic, name) in statics.iter(){
-    //     if (nstatic.typ == NavStaticType::Blocker) & (name.contains("Tree")) {
-    //         hs.insert(entity);
-    //         count_blockers += 1;
-    //     }
-    //     if count_blockers >= 1600 {
-    //         info!("Blockers limit reached");
-    //         break;
-    //     }
-    // }
+    for entity in navstatics.iter(){
+        hs.insert(entity);
+    }
 
     let settings = NavmeshSettings {
         filter: Some(hs),
         walkable_climb: 1.0,
         walkable_slope_angle: 55.0_f32.to_radians(),
         agent_radius: 0.5,
-        agent_height: 0.0,
+        agent_height: 0.1,
         // min_region_size: 10,
         max_vertices_per_polygon: 20,
-        max_simplification_error: 1.3,
+        max_simplification_error: 1.2,
         // cell_size_fraction: 2.0,
         // cell_height_fraction: 4.0,
         up: Vec3::Y,

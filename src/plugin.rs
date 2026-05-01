@@ -68,7 +68,7 @@ fn on_generate_navmesh(
 fn check_navgendata(
     navgendata:     Res<NavmeshGenerationData>,
     mut commands:   Commands,
-    nav_colliders:  Query<Entity, Or<(With<TerrainChunk>, With<WaterNavmeshSource>)>>,
+    nav_colliders:  Query<Entity, Or<(With<TerrainChunk>, With<NavStatic>)>>,
     water_sources:   Query<Entity, With<WaterNavmeshSource>>
 ){
 
@@ -82,11 +82,12 @@ fn check_navgendata(
     if dones == navgendata.recast_handles.len(){
         info!("Cleaning up after navmesh generation");
 
-        commands.remove_resource::<NavmeshGenerationData>();
+        // commands.remove_resource::<NavmeshGenerationData>();
 
         for entity in nav_colliders.iter(){
             commands.entity(entity).remove::<Collider>();
             commands.entity(entity).remove::<RigidBody>();
+            commands.entity(entity).try_remove::<NavStatic>();
         }
 
         for entity in water_sources.iter(){
@@ -128,50 +129,6 @@ impl NavStatic {
         NavStatic{typ: NavStaticType::Navigable(0.0)}
     }
 }
-
-
-// impl NavStatic {
-//     pub fn navigable_rect(
-//         x: f32, 
-//         y: f32,
-//         y_offset: f32
-//     ) -> Self {
-//         NavStatic {
-//             typ: NavStaticType::Navigable(y_offset),
-//             shape: NavStaticShape::rect(Vec2::new(x,y))
-//         }
-//     }
-
-//     pub fn navigable_circle(
-//         radius : f32,
-//         y_offset: f32
-//     ) -> Self {
-//         NavStatic{
-//             typ: NavStaticType::Navigable(y_offset),
-//             shape: NavStaticShape::circle(radius)
-//         }
-//     }
-
-//     pub fn blocker_rect(
-//         x: f32, y: f32
-//     ) -> Self {
-//         NavStatic{
-//             typ: NavStaticType::Blocker,
-//             shape: NavStaticShape::rect(Vec2::new(x,y))
-//         }
-//     }
-
-//     pub fn blocker_circle(
-//         radius : f32
-//     ) -> Self {
-//         NavStatic{
-//             typ: NavStaticType::Blocker,
-//             shape: NavStaticShape::circle(radius)
-//         }
-//     }
-
-// }
-
 
 #[derive(Component)]
 pub struct NavmeshWater;
