@@ -149,16 +149,16 @@ fn generate_terrain_navmesh_on_colliders_ready(
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone, Component)]
-pub(crate) struct TerrainRayMeshData {
+pub struct TerrainRayMeshData {
     pub mesh_transform:            Mat4,
     triangle_vertex_positions: Vec<[Vec3A; 3]>,
     triangle_normals:          Vec<Vec3A>,
     triangle_count:            usize,
-    pub (crate) vertices:              Vec<Vec3A>,
-    pub (crate) edges:                 HashSet<(usize, usize)>,
+    pub vertices:              Vec<Vec3A>,
+    pub edges:                 HashSet<(usize, usize)>,
 }
 impl TerrainRayMeshData {
-    pub(crate)  fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
+    pub fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
         if let Some(vpos) = self.triangle_vertex_positions.get(triangle_id){
             let mt = self.mesh_transform.inverse();
             return Some([
@@ -170,7 +170,7 @@ impl TerrainRayMeshData {
         return None;
     }
 
-    pub (crate) fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
+    pub fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
         if let Some(intersection_data) = self.ray_intersection(&ray.origin(), &ray.direction()){
             let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
@@ -180,7 +180,7 @@ impl TerrainRayMeshData {
         }
     }
 
-    pub (crate) fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
+    pub fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
         if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
             panic!("Wrong Topology for Terrain {:?}", mesh.primitive_topology());
         };
@@ -354,7 +354,7 @@ impl TerrainRayMeshData {
     // }
 
     // Tests against all triangles of the mesh
-    pub (crate) fn ray_intersection(
+    pub fn ray_intersection(
         &self, 
         ray_origin: &Vec3,
         ray_direction: &Vec3
