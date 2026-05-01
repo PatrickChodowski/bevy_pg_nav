@@ -9,8 +9,8 @@ use bevy_rerecast::generator::NavmeshGenerator;
 use bevy_rerecast::NavmeshSettings;
 
 use bevy_pg_core::prelude::TerrainChunk;
-use crate::prelude::{GenerateNavMesh, PGNavmeshType};
-use crate::plugin::{CollidersReady, RecastNavmeshHandles, WaitColliders};
+use crate::pgnavmesh::PGNavmeshType;
+use crate::plugin::NavmeshGenerationData;
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 
@@ -21,49 +21,70 @@ impl Plugin for PGTerrainNavPlugin {
         app
         .add_observer(prepare_terrain_colliders)
         .add_observer(generate_terrain_navmesh_on_colliders_ready)
+        .add_systems(Update, wait_for_colliders.run_if(resource_exists::<WaitColliders>))
         ;
     }
 }
 
+
+#[derive(Event)]
+pub(crate) struct GenerateTerrainNavmesh;
+
 fn prepare_terrain_colliders(
-    trigger:             On<GenerateNavMesh>,
-    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, Option<&Name>)>,
-    meshes:              Res<Assets<Mesh>>,
-    mut commands:        Commands,
-    mut navmesh_handles: ResMut<RecastNavmeshHandles>
+    _trigger:       On<GenerateTerrainNavmesh>,
+    terrains:       Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    meshes:         Res<Assets<Mesh>>,
+    mut commands:   Commands,
+    navgendata:     Res<NavmeshGenerationData>
 ){
-    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.plane_entity);
-
-    let Ok((_terrain_transform, terrain, terrain_mesh, maybe_name)) = terrains.get(trigger.plane_entity) else {return};
-
-    if maybe_name.is_none(){
-        warn!("Plane needs a name before generating navmesh");
-        return;
-    }
-
-    navmesh_handles.name = maybe_name.unwrap().to_string();
-
+    let Ok((_terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
+    info!("[NAV] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let heightfield = extract_heightfield(&mesh);
     let collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
-    commands.entity(trigger.plane_entity).insert((collider, RigidBody::Static));
-    commands.insert_resource(WaitColliders{entity: trigger.plane_entity, timer: Timer::from_seconds(0.5, TimerMode::Once)});
+    commands.entity(navgendata.plane_entity).insert((collider, RigidBody::Static));
+    commands.insert_resource(WaitColliders::new());
+}
+
+#[derive(Resource)]
+struct WaitColliders {
+    timer: Timer
+}
+impl WaitColliders {
+    fn new() -> Self {
+        return WaitColliders{timer: Timer::from_seconds(0.5, TimerMode::Once)};
+    }
+}
+
+#[derive(Event)]
+struct CollidersReady;
+
+fn wait_for_colliders(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut wait: ResMut<WaitColliders>
+){
+    wait.timer.tick(time.delta());
+
+    if wait.timer.is_finished(){
+        commands.trigger(CollidersReady);
+        commands.remove_resource::<WaitColliders>();
+    }
 }
 
 
+
 fn generate_terrain_navmesh_on_colliders_ready(
-    trigger:             On<CollidersReady>,
-    mut generator:       NavmeshGenerator,
-    mut commands:        Commands,
-    terrains:            Query<(&Transform, &TerrainChunk, &Mesh3d, &Name)>,
-    mut navmesh_handles: ResMut<RecastNavmeshHandles>,
+    _trigger:        On<CollidersReady>,
+    mut generator:  NavmeshGenerator,
+    mut commands:   Commands,
+    mut navgendata: ResMut<NavmeshGenerationData>,
 
 ){
 
-    info!("[NAV] Generate terrain navmesh for entity: {}", trigger.entity);
-    let Ok((_terrain_transform, _terrain, _terrain_mesh, terrain_name)) = terrains.get(trigger.entity) else {return};
+    info!("[NAV] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let mut hs: HashSet<Entity> = HashSet::new();
-    hs.insert(trigger.entity);
+    hs.insert(navgendata.plane_entity);
 
 
     // for (entity, transform, nstatic, name) in statics.iter(){
@@ -117,8 +138,7 @@ fn generate_terrain_navmesh_on_colliders_ready(
     };
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
-    navmesh_handles.data.insert(PGNavmeshType::Terrain, Some(navmesh));
-    navmesh_handles.name = terrain_name.to_string();
+    navgendata.add_handle(PGNavmeshType::Terrain, navmesh);
 }
 
 
@@ -129,13 +149,13 @@ fn generate_terrain_navmesh_on_colliders_ready(
 
 // Generate Optimized data structure for raycast testing
 #[derive(Debug, Clone, Component)]
-pub struct TerrainRayMeshData {
+pub(crate) struct TerrainRayMeshData {
     pub mesh_transform:            Mat4,
     triangle_vertex_positions: Vec<[Vec3A; 3]>,
     triangle_normals:          Vec<Vec3A>,
     triangle_count:            usize,
-    pub vertices:              Vec<Vec3A>,
-    pub edges:                 HashSet<(usize, usize)>,
+    pub (crate) vertices:              Vec<Vec3A>,
+    pub (crate) edges:                 HashSet<(usize, usize)>,
 }
 impl TerrainRayMeshData {
     pub(crate)  fn triangle(&self, triangle_id: usize) -> Option<[Vec3A; 3]> {
@@ -150,7 +170,7 @@ impl TerrainRayMeshData {
         return None;
     }
 
-    pub fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
+    pub (crate) fn test(&self, ray: &NavRay) -> Option<(f32, usize, Vec3)>{      
         if let Some(intersection_data) = self.ray_intersection(&ray.origin(), &ray.direction()){
             let dist = intersection_data.distance.round() as i32;
             let height: f32 = (ray.origin.y as i32 - dist) as f32;
@@ -160,7 +180,7 @@ impl TerrainRayMeshData {
         }
     }
 
-    pub fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
+    pub (crate) fn from_mesh(mesh: &Mesh, mesh_transform: &Mat4) -> Self {
         if mesh.primitive_topology() != PrimitiveTopology::TriangleList {
             panic!("Wrong Topology for Terrain {:?}", mesh.primitive_topology());
         };
@@ -334,7 +354,7 @@ impl TerrainRayMeshData {
     // }
 
     // Tests against all triangles of the mesh
-    pub fn ray_intersection(
+    pub (crate) fn ray_intersection(
         &self, 
         ray_origin: &Vec3,
         ray_direction: &Vec3

@@ -205,7 +205,7 @@ impl PGNavmesh {
                 }
             }
 
-            info!("ID: {} polygon count: {}", id, node_polygons.len());
+            // info!("ID: {} polygon count: {}", id, node_polygons.len());
 
             let node = BVHNode{id: id, aabb: *aabb, typ: BHVType::Leaf(node_polygons)};
             nodes.push(node);

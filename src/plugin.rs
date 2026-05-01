@@ -8,10 +8,10 @@ use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
 use bevy_rerecast::prelude::*;
 use avian_rerecast::AvianBackendPlugin;
-use bevy_pg_core::prelude::{GameState, TerrainChunk, WaterChunk};
+use bevy_pg_core::prelude::{GameState, TerrainChunk};
 
-use crate::water::{PGWaterNavPlugin, WaterNavmeshSource};
-use crate::terrain::PGTerrainNavPlugin;
+use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
+use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
@@ -28,39 +28,67 @@ impl Plugin for PGNavPlugin {
             PGTerrainNavPlugin,
             PGWaterNavPlugin
         ))
-        .insert_resource(RecastNavmeshHandles::default())
+        .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
+        .add_systems(Update, check_navgendata.run_if(resource_exists_and_changed::<NavmeshGenerationData>))
         .add_systems(OnExit(GameState::Play), clear)
-        .add_systems(Update, wait_for_colliders.run_if(resource_exists::<WaitColliders>))
         ;
     }
 }
 
-#[derive(Resource)]
-pub (crate) struct WaitColliders {
-    pub (crate) entity: Entity,
-    pub (crate) timer: Timer
-}
-
-#[derive(Event)]
-pub (crate) struct CollidersReady {
-    pub (crate) entity: Entity
-}
-
-fn wait_for_colliders(
-    time: Res<Time>,
-    mut commands: Commands,
-    mut wait: ResMut<WaitColliders>
+// Entry point for external systems
+fn on_generate_navmesh(
+    trigger:      On<GenerateNavMesh>,
+    terrains:     Query<Option<&Name>, (With<TerrainChunk>, With<Transform>, With<Mesh3d>)>,
+    mut commands: Commands
 ){
-    wait.timer.tick(time.delta());
+    let Ok(maybe_name) = terrains.get(trigger.plane_entity) else {return};
 
-    if wait.timer.is_finished(){
-        commands.trigger(CollidersReady{entity: wait.entity});
-        commands.remove_resource::<WaitColliders>();
+    if maybe_name.is_none(){
+        warn!("Plane needs a name before generating navmesh");
+        return;
+    }
+    let plane_name = maybe_name.unwrap().to_string();
+
+    info!("Generate Navmesh for plane entity: {} name: {}", trigger.plane_entity, plane_name);
+    commands.insert_resource(NavmeshGenerationData::new(trigger.plane_entity, plane_name));
+    commands.trigger(GenerateTerrainNavmesh);
+    commands.trigger(GenerateWaterNavmesh);
+}
+
+fn check_navgendata(
+    navgendata:     Res<NavmeshGenerationData>,
+    mut commands:   Commands,
+    nav_colliders:  Query<Entity, Or<(With<TerrainChunk>, With<WaterNavmeshSource>)>>,
+    water_sources:   Query<Entity, With<WaterNavmeshSource>>
+){
+
+    let mut dones: usize = 0;
+
+    for (_navtype, navstate) in navgendata.recast_handles.iter(){
+        if navstate.1 {
+            dones += 1;
+        }
+    }
+    if dones == navgendata.recast_handles.len(){
+        info!("Cleaning up after navmesh generation");
+
+        commands.remove_resource::<NavmeshGenerationData>();
+
+        for entity in nav_colliders.iter(){
+            commands.entity(entity).remove::<Collider>();
+            commands.entity(entity).remove::<RigidBody>();
+        }
+
+        for entity in water_sources.iter(){
+            commands.entity(entity).despawn();
+        }
     }
 
 }
+
+
 
 fn clear(
     mut commands: Commands,
@@ -69,6 +97,8 @@ fn clear(
     for entity in navs.iter(){
         commands.entity(entity).despawn();
     }
+
+    commands.remove_resource::<NavmeshGenerationData>();
 
 }
 
@@ -156,76 +186,81 @@ pub struct GenerateNavMesh {
 }
 
 #[derive(Resource, Debug)]
-pub (crate) struct RecastNavmeshHandles {
-    pub(crate) data: HashMap<PGNavmeshType, Option<Handle<Navmesh>>>,
-    pub(crate) name: String // needs to be passed here
+pub (crate) struct NavmeshGenerationData {
+    recast_handles: HashMap<PGNavmeshType, (Option<Handle<Navmesh>>, bool)>,
+    name: String,
+    pub(crate) plane_entity: Entity
 }
-impl Default for RecastNavmeshHandles {
-    fn default() -> Self {
-        RecastNavmeshHandles {
-            data: HashMap::from(
+impl NavmeshGenerationData {
+    pub(crate) fn new(
+        plane_entity: Entity, 
+        name: String
+    ) -> Self {
+        let ngd = NavmeshGenerationData {
+            recast_handles: HashMap::from(
                 [
-                    (PGNavmeshType::Terrain, None),
-                    (PGNavmeshType::Water, None)
+                    (PGNavmeshType::Terrain, (None, false)),
+                    (PGNavmeshType::Water, (None, false))
                 ]
             ),
-            name: "test".to_string()
-        }
+            name: name.clone(),
+            plane_entity
+        };
+        return ngd;
+    }
+    pub(crate) fn add_handle(
+        &mut self, 
+        typ: PGNavmeshType, 
+        handle: Handle<Navmesh>
+    ){
+        self.recast_handles.insert(typ, (Some(handle), false));
     }
 }
+
 
 
 fn on_ready_navmesh(
-    trigger:             On<NavmeshReady>,
-    mut commands:        Commands,
-    ass_nav:             Res<Assets<Navmesh>>,
-    navmesh_handles:     Res<RecastNavmeshHandles>,
-    nav_colliders:       Query<Entity, Or<(With<TerrainChunk>, With<WaterNavmeshSource>)>>,
-    wms:                 Query<Entity, With<WaterNavmeshSource>>
+    trigger:        On<NavmeshReady>,
+    mut commands:   Commands,
+    ass_nav:        Res<Assets<Navmesh>>,
+    mut navgendata: ResMut<NavmeshGenerationData>
 ){
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
-    info!("On ready navmesh...");
+    let navname = navgendata.name.clone();
 
-    for (navmesh_type, maybe_navmesh_handle) in navmesh_handles.data.iter(){
-        if let Some(navmesh_handle) = maybe_navmesh_handle {
-            if navmesh_handle.id() == trigger.0 {
-                
-                let mut pgn: PGNavmesh = convert_rerecast(
-                    recast_navmesh,
-                    navmesh_type
-                );
+    for (navmesh_type, ref mut nav_state) in navgendata.recast_handles.iter_mut(){
+        if nav_state.1 {continue};
+        let Some(ref navmesh_handle) = nav_state.0  else {continue};
+        if navmesh_handle.id() != trigger.0 {continue};
 
-                pgn.name = navmesh_handles.name.clone();
+        let mut pgn: PGNavmesh = convert_rerecast(
+            recast_navmesh,
+            navmesh_type
+        );
+        pgn.name = navname.clone();
 
-                // pgn.cleanup_lower();
-                pgn.reorder_vertex_polygons();
-                pgn.islands_removal();
-                pgn.bake();
-                
-                commands.spawn(pgn.clone());
+        // pgn.cleanup_lower();
+        pgn.reorder_vertex_polygons();
+        pgn.islands_removal();
+        pgn.bake();
+        
+        commands.spawn(pgn.clone());
 
-                info!("Serializing navmesh to {}", pgn.filename());
-                IoTaskPool::get().spawn(async move {
-                    let f = File::create(&pgn.filename()).ok().unwrap();
-                    let mut writer = BufWriter::new(f);
-                    let _res = serde_json::to_writer(&mut writer, &pgn);
-                    let _res = writer.flush();
-                })
-                .detach();
-
-                for nav_collider_entity in nav_colliders.iter(){
-                    commands.entity(nav_collider_entity).remove::<Collider>();
-                    commands.entity(nav_collider_entity).remove::<RigidBody>();
-                }
-                for water_nav_source_entity in wms.iter(){
-                    commands.entity(water_nav_source_entity).despawn();
-                }
-            }
-        }
+        info!("Serializing navmesh to {}", pgn.filename());
+        IoTaskPool::get().spawn(async move {
+            let f = File::create(&pgn.filename()).ok().unwrap();
+            let mut writer = BufWriter::new(f);
+            let _res = serde_json::to_writer(&mut writer, &pgn);
+            let _res = writer.flush();
+        })
+        .detach();
+        
+        nav_state.1 = true;
     }
 }
 
+// Inserts components of type. Separate system as it can also run when spawning navmesh from file
 fn on_spawn_navmesh(
    trigger:       On<Add, PGNavmesh>,
    mut commands:  Commands,

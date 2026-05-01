@@ -12,8 +12,8 @@ use bevy_rerecast::NavmeshSettings;
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 
 use bevy_pg_core::prelude::{AABB, TerrainChunk, WaterChunk};
-use crate::plugin::RecastNavmeshHandles;
-use crate::prelude::{GenerateNavMesh,PGNavmeshType};
+use crate::plugin::NavmeshGenerationData;
+use crate::pgnavmesh::PGNavmeshType;
 use crate::terrain::TerrainRayMeshData;
 use crate::tools::NavRay;
 
@@ -28,30 +28,25 @@ impl Plugin for PGWaterNavPlugin {
     }
 }
 
+#[derive(Event)]
+pub(crate) struct GenerateWaterNavmesh;
+
+
 fn generate_water_navmesh(
-    trigger:                On<GenerateNavMesh>,
-    terrains:               Query<(&Transform, &Mesh3d, Option<&Name>, &TerrainChunk)>,
-    water_query:            Query<(&Transform, &WaterChunk)>,
-    mut commands:           Commands,
-    mut meshes:             ResMut<Assets<Mesh>>,
-    mut materials:          ResMut<Assets<StandardMaterial>>,
-    mut navmesh_handles:    ResMut<RecastNavmeshHandles>,
+    _trigger:          On<GenerateWaterNavmesh>,
+    terrains:         Query<(&Transform, &Mesh3d, &TerrainChunk)>,
+    water_query:      Query<(&Transform, &WaterChunk)>,
+    mut commands:     Commands,
+    mut meshes:       ResMut<Assets<Mesh>>,
+    mut materials:    ResMut<Assets<StandardMaterial>>,
+    navgendata:       Res<NavmeshGenerationData>,
 ){
 
-    let Ok((terrain_transform, mesh3d, maybe_name, chunk)) = terrains.get(trigger.plane_entity) else {return};
-
-    if maybe_name.is_none(){
-        warn!("Plane needs a name before generating water navmesh");
-        return;
-    }
-
-    navmesh_handles.name = maybe_name.unwrap().to_string();
-
-    info!("Generate Water Navmesh for entity {}", trigger.plane_entity);
-    // let raycast_step = navconfig.raycast_step as usize;
-    let raycast_step = 1;
+    let Ok((terrain_transform, mesh3d, chunk)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&mesh3d.0) else {return};
 
+    info!("Generate Water Navmesh for entity {}", navgendata.plane_entity);
+    let raycast_step = 1;
     let loc = terrain_transform.translation;
     info!("terrain chunk dims: {} terrain loc: {}", chunk.dims, loc);
     let chunk_half_dims: Vec2 = chunk.dims*0.5;
@@ -147,7 +142,7 @@ fn on_water_navmesh_sources_ready(
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
     water_sources:       Query<Entity, With<WaterNavmeshSource>>,
-    mut navmesh_handles: ResMut<RecastNavmeshHandles>
+    mut navgendata: ResMut<NavmeshGenerationData>
 ){
     let mut hs = HashSet::new();
     for water_mesh_entity in water_sources.iter(){
@@ -168,7 +163,7 @@ fn on_water_navmesh_sources_ready(
     };
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
-    navmesh_handles.data.insert(PGNavmeshType::Water, Some(navmesh));
+    navgendata.add_handle(PGNavmeshType::Water, navmesh);
 }
 
 
@@ -214,7 +209,7 @@ impl Ord for WaterVertex {
     }
 }
 
-pub(crate) fn raycasts_rain(
+fn raycasts_rain(
     xs:             &Vec<f32>,
     zs:             &Vec<f32>,
     // ray_target_meshes:     &Vec<RayTargetMesh>,
@@ -269,7 +264,7 @@ pub(crate) fn raycasts_rain(
 }
 
 
-pub(crate) fn group_waters(
+fn group_waters(
     v_waters: &mut Vec<WaterVertex>, 
     maxx: i32, 
     maxz: i32
@@ -372,7 +367,7 @@ pub(crate) fn group_waters(
         }
     }
 
-    let unique_groups = group_map.iter().map(|v| v.1.group).collect::<HashSet<usize>>();
+    // let unique_groups = group_map.iter().map(|v| v.1.group).collect::<HashSet<usize>>();
 
     // 3rd pass - keep only boundary points
     let mut to_rm: Vec<(usize, usize)> = Vec::new();
@@ -401,7 +396,7 @@ pub(crate) fn group_waters(
 }
 
 
-pub(crate) fn mesh_from_triangles(
+fn mesh_from_triangles(
     triangles: &Vec<[Vec3A; 3]>
 ) -> Mesh {
     let mut positions = Vec::new();
@@ -434,7 +429,7 @@ pub(crate) fn mesh_from_triangles(
 }
 
 
-pub(crate) fn triangulate(
+fn triangulate(
     vertices: &mut Vec<Vec3A>
 ) -> Vec<[Vec3A; 3]> {
     let flat_vertices: Vec<f64> = vertices
@@ -454,7 +449,7 @@ pub(crate) fn triangulate(
 }
 
 
-pub(crate) fn remove_collinear(
+fn remove_collinear(
     vlocs: &mut Vec<Vec3A>
 ) -> Vec<Vec3A> {
     let threshold: f32 = 0.01;
@@ -497,7 +492,7 @@ pub(crate) fn remove_collinear(
 }
 
 
-pub(crate) fn order_boundary(
+fn order_boundary(
     vertices: &mut Vec<WaterVertex>, 
     maxx: i32, 
     maxz: i32

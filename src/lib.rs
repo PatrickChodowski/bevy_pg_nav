@@ -15,7 +15,7 @@ pub mod prelude {
     pub use crate::plugin::{
         GenerateNavMesh, PGNavPlugin, NavmeshTerrain, NavmeshWater
     };
-    pub use crate::terrain::TerrainRayMeshData;
-    pub use crate::types::{PGPolygon, PGVertex};
+    // pub use crate::terrain::TerrainRayMeshData;
+    // pub use crate::types::{PGPolygon, PGVertex};
     pub use crate::pgnavmesh::{PGNavmesh, PGNavmeshType, find_point};
 }
