@@ -22,9 +22,9 @@ pub struct PGNavPlugin{
 }
 
 #[derive(Resource)]
-pub(crate) struct NavResources {
+pub struct NavResources {
     pub(crate) colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>,
-    pub(crate) visible: bool
+    pub visible: bool
 }
 
 impl Plugin for PGNavPlugin {
