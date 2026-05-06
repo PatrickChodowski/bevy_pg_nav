@@ -19,6 +19,7 @@ pub struct PGNavmesh {
     pub vertices:     HashMap<usize, PGVertex>,
     pub search_limit: usize,
     pub typ:          PGNavmeshType,
+    pub aabb:         AABB,
     pub bvh:          BVH,
     pub name:         String
 }
@@ -31,6 +32,7 @@ impl Default for PGNavmesh {
             search_limit: 1000,
             typ: PGNavmeshType::Terrain,
             name: "test".to_string(),
+            aabb: AABB::default(),
             bvh: BVH::empty()
         }
     }
@@ -38,6 +40,12 @@ impl Default for PGNavmesh {
 
 
 impl PGNavmesh {
+
+    pub fn aabb(&mut self){
+        let locs: Vec<Vec3> = self.vertices.iter().map(|(_k, v)| v.loc).collect::<Vec<Vec3>>();
+        self.aabb = AABB::from_vertices(&locs);
+    }
+
     pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
         let loc = origin.xz();
         for node in self.bvh.data.iter(){
@@ -98,40 +106,35 @@ impl PGNavmesh {
         return (Vec3::new(closest_point.x, height, closest_point.y), best_poly_index);
     }
 
-    pub fn path_points(
-        &self, 
-        from0:        &Vec2, 
-        to0:          &Vec2,
-        agent_radius: f32
-    ) -> Option<(Path, usize, usize)> {
-
-        let from = *from0;
-        let to = *to0;
-        let starting_polygon: &PGPolygon = self.has_point(&from).map(|p| p.0).unwrap();
-        let Some(ending_polygon) = self.has_point(&to).map(|p| p.0) else {return None};
+    pub(crate) fn path_between_polygons(
+        &self,
+        start:            &Vec2,
+        end:              &Vec2,
+        start_polygon_id: usize,
+        end_polygon_id:   usize,
+        agent_radius:     f32
+    ) -> Option<(Path, usize, usize)>{
 
         if DEBUG {
-            info!(" [Debug] find path between {:?} and {} (from {} to {})", starting_polygon.index, ending_polygon.index, from, to);
-            // info!(" start polygon: {:?}", starting_polygon);
-            // info!(" end polygon: {:?}", ending_polygon);
+            info!(" [Debug] find path between {:?} and {} (from {} to {})", 
+            start_polygon_id, end_polygon_id, start, end);
         }
 
-        if starting_polygon.index == ending_polygon.index {
+        if start_polygon_id == end_polygon_id {
             let path = Path {
-                length: from.distance(to),
-                path: vec![to].into(),
+                length: start.distance(*end),
+                path: vec![*end].into(),
             };
             if DEBUG {
                 info!(" [Debug] same polygon found path");
             }
-            return Some((path, starting_polygon.index, ending_polygon.index));
+            return Some((path, start_polygon_id, end_polygon_id));
         }
 
-        // println!("Need to find path between {}: ({}) and {}: ({})", starting_polygon.index, from, ending_polygon.index, to);
         let mut path_finder = PathFinder::setup(
             self,
-            (from, starting_polygon.index),
-            (to, ending_polygon.index)
+            (*start, start_polygon_id),
+            (*end, end_polygon_id)
         );
 
         for _s in 0..self.search_limit {
@@ -140,12 +143,12 @@ impl PGNavmesh {
             }
              match path_finder.search() {
                 SearchStep::Found(path) => {
-                    let offset_path = path.offset_inward(from, agent_radius);
+                    let offset_path = path.offset_inward(*start, agent_radius);
                     if DEBUG {
                         info!(" [Debug] found");
                     }
                     
-                    return Some((offset_path, starting_polygon.index, ending_polygon.index));
+                    return Some((offset_path, start_polygon_id, end_polygon_id));
                 }
                 SearchStep::NotFound => {
                     if DEBUG {
@@ -161,6 +164,18 @@ impl PGNavmesh {
         }
 
         return None;
+
+    }
+
+    pub fn path_points(
+        &self, 
+        start:        &Vec2, 
+        end:          &Vec2,
+        agent_radius: f32
+    ) -> Option<(Path, usize, usize)> {
+        let start_polygon: &PGPolygon = self.has_point(start).map(|p| p.0).unwrap();
+        let Some(end_polygon) = self.has_point(end).map(|p| p.0) else {return None};
+        return self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
     }
 
     pub fn vertex(&self, id: &usize) -> &PGVertex {
@@ -572,6 +587,18 @@ impl PGNavmesh {
         };
         return filename;
     }
+
+    pub(crate) fn link(
+        &self, 
+        end_nav: &PGNavmesh, 
+        start: &Vec2, 
+        end: &Vec2
+    ) {
+
+    }
+
+    
+
 
 }
 

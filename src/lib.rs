@@ -1,4 +1,3 @@
-// mod debug;
 mod pathfinding;
 mod pgnavmesh;
 mod plugin;
@@ -8,9 +7,9 @@ mod terrain;
 mod tools;
 mod types;
 mod bvh;
+mod multi_nav;
 
 pub mod prelude {
-    // pub use crate::debug::display_polygon;
     pub use crate::pathfinding::{Path, PathFinder, SearchStep};
     pub use crate::plugin::{
         GenerateNavMesh, PGNavPlugin, NavmeshTerrain, NavmeshWater, NavStatic, NavStaticType, NavResources
