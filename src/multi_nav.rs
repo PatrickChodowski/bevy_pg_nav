@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy::platform::collections::{HashSet};
+use std::collections::VecDeque;
 
 use crate::prelude::{PGNavmesh, PGNavmeshType};
 use crate::prelude::Path;
@@ -211,16 +213,19 @@ fn multi_nav_path_points(
         );
     } else {
 
-        start_data.1.path_multi_nav(end_data.1, start, end);
+        start_data.1.path_multi_nav(
+            end_data.1, 
+            start, 
+            end,
+            start_data.0,
+            end_data.0,
+            &navs
+        );
 
-        // 1) Find best point that links both navmeshes relative to start and end
-        // 2) Find route from start to link point
-        // 3) Find route from link point to end
+
 
     }
 
-    // Different navs, joined
-    // Different navs, separate -> ugh, map of nav connections???
 
     return None;
 }
@@ -230,4 +235,39 @@ struct ConnectNavs {
     nav_entity1: Entity,
     nav_entity2: Entity,
     polygon_pairs: Vec<(u32, u32)> // polygon from entity1 and polygon from entity2
+}
+
+
+// Graph search for connections between navmesh A and navmesh B
+pub (crate) fn search_navs_path(
+    start: Entity,
+    end:   Entity,
+    navs:  &Query<(Entity, &PGNavmesh)>
+) -> Option<Vec<(Entity, Vec<(u32, u32)>)>> {
+    if start == end { return Some(vec![(start, vec![])]); }
+
+    let mut visited: HashSet<Entity> = HashSet::new();
+    let mut queue:   VecDeque<(Entity, Vec<(Entity, Vec<(u32, u32)>)>)> = VecDeque::new();
+
+    queue.push_back((start, vec![(start, vec![])]));
+    visited.insert(start);
+
+    while let Some((current, path)) = queue.pop_front() {
+        let Ok((_nav_entity, nav)) = navs.get(current) else { continue };
+
+        for (neighbour, pairs) in &nav.conns {
+            if !visited.insert(*neighbour) { continue; }
+
+            let mut new_path = path.clone();
+            new_path.push((*neighbour, pairs.clone()));
+
+            if *neighbour == end {
+                return Some(new_path);
+            }
+
+            queue.push_back((*neighbour, new_path));
+        }
+    }
+
+    None
 }

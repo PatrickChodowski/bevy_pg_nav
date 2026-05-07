@@ -5,6 +5,7 @@ use bevy_pg_core::prelude::AABB;
 
 use crate::bvh::{BVH, BHVType, BVHNode, aabb_intersects_triangle};
 use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
+use crate::multi_nav::search_navs_path;
 use crate::types::{PGPolygon, PGVertex};
 
 
@@ -596,8 +597,20 @@ impl PGNavmesh {
         &self, 
         end_nav: &PGNavmesh, 
         start: &Vec2, 
-        end: &Vec2
+        end: &Vec2,
+        start_nav_entity: Entity,
+        end_nav_entity: Entity,
+        navs: &Query<(Entity, &PGNavmesh)>,
     ) {
+
+        if let Some(nav_path) = search_navs_path(start_nav_entity, end_nav_entity, navs){
+
+
+            // self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
+
+
+        }
+
 
     }
 
