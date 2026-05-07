@@ -11,7 +11,6 @@ impl Plugin for PGMultiNavPlugin {
     fn build(&self, app: &mut App) {
         app
         .add_message::<ConnectNavs>()
-        .add_message::<DisconnectNavs>()
         .add_observer(on_spawn_nav)
         .add_observer(on_despawn_nav)
         .add_systems(Update, connect_navs.run_if(on_message::<ConnectNavs>))
@@ -53,22 +52,18 @@ fn on_spawn_nav(
 
 }
 
-
 fn on_despawn_nav(
     trigger:    On<Remove, PGNavmesh>,
-    navs:       Query<(Entity, &PGNavmesh)>,
-    mut writer: MessageWriter<DisconnectNavs>,
+    mut navs:   Query<(Entity, &mut PGNavmesh)>
 ){
-    let Ok((r_entity, r_nav)) = navs.get(trigger.entity) else {return};
-
-    for (entity, nav) in navs.iter(){
-        if entity == r_entity {
+    for (entity, mut nav) in navs.iter_mut(){
+        if entity == trigger.entity {
             continue;
         }
-
-
+        if nav.conns.contains_key(&trigger.entity) {
+           nav.conns.remove(&trigger.entity);
+        }
     }
-
 }
 
 fn connect_navs(
@@ -82,7 +77,6 @@ fn connect_navs(
         nav2.conns.insert(msg.nav_entity1, reversed);
     }
 }
-
 
 
 // Helpers for managing search paths when there is multiple navigation meshes, types, etc. (Navigation mesh per tile.)
@@ -225,28 +219,15 @@ fn multi_nav_path_points(
 
     }
 
-
-
-
-
     // Different navs, joined
     // Different navs, separate -> ugh, map of nav connections???
 
-
-
     return None;
 }
-
 
 #[derive(Message)]
 struct ConnectNavs {
     nav_entity1: Entity,
     nav_entity2: Entity,
     polygon_pairs: Vec<(u32, u32)> // polygon from entity1 and polygon from entity2
-}
-
-#[derive(Message)]
-struct DisconnectNavs {
-    nav_entity1: Entity,
-    nav_entity2: Entity
 }
