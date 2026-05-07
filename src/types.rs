@@ -7,13 +7,13 @@ use crate::pgnavmesh::PGNavmesh;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGVertex {
-    pub index:    usize,
+    pub index:    u32,
     pub loc:      Vec3,
-    pub polygons: Vec<usize>
+    pub polygons: Vec<u32>
 }
 impl PGVertex {
     pub fn is_corner(&self) -> bool {
-        self.polygons.contains(&usize::MAX)
+        self.polygons.contains(&u32::MAX)
     }
 
     pub fn xz(&self) -> Vec2 {
@@ -23,13 +23,13 @@ impl PGVertex {
     pub fn common(
         &self, 
         other: &PGVertex,
-        except: &usize
-    ) -> Vec<usize> {
+        except: &u32
+    ) -> Vec<u32> {
 
         return self.polygons.iter()
             .filter(|p_index| other.polygons.contains(*p_index) && p_index != &except)
             .map(|x| *x)
-            .collect::<Vec<usize>>();
+            .collect::<Vec<u32>>();
     }
 }
 
@@ -37,9 +37,9 @@ impl PGVertex {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PGPolygon {
-    pub index:      usize,
-    pub vertices:   Vec<usize>,
-    pub neighbours: HashSet<usize>
+    pub index:      u32,
+    pub vertices:   Vec<u32>,
+    pub neighbours: HashSet<u32>
 }
 
 impl PGPolygon {
@@ -58,6 +58,16 @@ impl PGPolygon {
         return [a,b,c];
     }
     
+    pub (crate) fn intersects(
+        &self, 
+        other: &PGPolygon, 
+        self_pgn: &PGNavmesh,
+        other_pgn: &PGNavmesh
+    ) -> bool {
+        let a = self.locs(self_pgn);
+        let b = other.locs(other_pgn);
+        sat_separated(&a, &b) == false
+    }
 
     pub fn center(&self, pgn: &PGNavmesh) -> Vec3 {
         let [a,b,c] = self.locs(pgn);
@@ -139,14 +149,14 @@ impl PGPolygon {
     pub fn circular_edges_index(
         &self,
         bounds: RangeInclusive<usize>,
-    ) -> impl Iterator<Item = [usize; 2]> + '_ {
+    ) -> impl Iterator<Item = [u32; 2]> + '_ {
         self.edges_index()
             .chain(self.edges_index())
             .skip(*bounds.start())
             .take(*bounds.end() + 1 - *bounds.start())
     }
     
-    pub fn edges_index(&self) -> impl Iterator<Item = [usize; 2]> + '_ {
+    pub fn edges_index(&self) -> impl Iterator<Item = [u32; 2]> + '_ {
         self.vertices
             .windows(2)
             .map(|pair| [pair[0], pair[1]])
@@ -286,4 +296,30 @@ fn _line_segments_intersect(
     } else {
         None
     }
+}
+
+#[inline(always)]
+fn sat_separated(a: &[Vec3; 3], b: &[Vec3; 3]) -> bool {
+    for verts in [a, b] {
+        for i in 0..3 {
+            let p = verts[i];
+            let q = verts[(i + 1) % 3];
+            let axis = Vec3::new(-(q.z - p.z), 0.0, q.x - p.x);
+
+            let (a_min, a_max) = project_tri(a, axis);
+            let (b_min, b_max) = project_tri(b, axis);
+
+            if a_max < b_min || b_max < a_min {
+                return true; // separated
+            }
+        }
+    }
+    false // no separating axis found
+}
+
+#[inline(always)]
+fn project_tri(tri: &[Vec3; 3], axis: Vec3) -> (f32, f32) {
+    let dots = tri.map(|v| v.x * axis.x + v.z * axis.z);
+    (dots[0].min(dots[1]).min(dots[2]),
+     dots[0].max(dots[1]).max(dots[2]))
 }

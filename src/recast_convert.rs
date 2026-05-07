@@ -38,12 +38,12 @@ pub(crate) fn convert_rerecast(
     let triangles_with_mesh_info = triangles_with_mesh_info(&renav);
     let areas = areas(&renav.polygon);
 
-    let mut vertex_map: HashMap<usize, PGVertex> = renav.detail.vertices.iter().enumerate()
+    let mut vertex_map: HashMap<u32, PGVertex> = renav.detail.vertices.iter().enumerate()
         .map(|(vertex_index, vloc)| {
             (
-                vertex_index, 
+                vertex_index as u32, 
                 PGVertex {
-                    index: vertex_index,
+                    index: vertex_index as u32,
                     loc: *vloc,
                     polygons: Vec::new()
                 }
@@ -53,7 +53,7 @@ pub(crate) fn convert_rerecast(
     // deduplicate vertex map
 
     let threshold = 0.001;
-    let index_mapping: HashMap<usize, usize> = deduplicate(&mut vertex_map, threshold);
+    let index_mapping: HashMap<u32, u32> = deduplicate(&mut vertex_map, threshold);
 
 
 
@@ -75,7 +75,7 @@ pub(crate) fn convert_rerecast(
                 let v2 = index_mapping.get(&v2_id).unwrap();
 
                 PGPolygon {
-                    index: polygon_index,
+                    index: polygon_index as u32,
                     vertices: vec![*v0, *v1, *v2],
                     neighbours: HashSet::new()
                 }
@@ -98,7 +98,7 @@ pub(crate) fn convert_rerecast(
 
     // Assign neighbours inside polygons
     for polygon in polygons.iter_mut(){
-        let mut neighbours: HashSet<usize> = HashSet::new();
+        let mut neighbours: HashSet<u32> = HashSet::new();
         for vertex_index in polygon.vertices.iter(){
             let vertex = vertex_map.get(vertex_index).unwrap();
             for v_polygon in vertex.polygons.iter(){
@@ -111,7 +111,7 @@ pub(crate) fn convert_rerecast(
     }
 
     info!("polygons length: {}", polygons.len());
-    let polygon_map = polygons.iter().map(|p| (p.index, p.clone())).collect::<HashMap<usize, PGPolygon>>();
+    let polygon_map = polygons.iter().map(|p| (p.index, p.clone())).collect::<HashMap<u32, PGPolygon>>();
 
     let pgn = PGNavmesh {
         polygons: polygon_map,
@@ -124,7 +124,7 @@ pub(crate) fn convert_rerecast(
 }
 
 struct PolygonWithMeshInfo {
-    vertices: [usize; 3],
+    vertices: [u32; 3],
     mesh_area: u8,
 }
 
@@ -142,9 +142,9 @@ fn triangles_with_mesh_info(renav: &Navmesh) -> Vec<PolygonWithMeshInfo> {
                 .take(mesh.triangle_count as usize)
                 .map(|[a, b, c]| PolygonWithMeshInfo {
                     vertices: [
-                        *a as usize + mesh.base_vertex_index as usize,
-                        *b as usize + mesh.base_vertex_index as usize,
-                        *c as usize + mesh.base_vertex_index as usize,
+                        *a as u32 + mesh.base_vertex_index as u32,
+                        *b as u32 + mesh.base_vertex_index as u32,
+                        *c as u32 + mesh.base_vertex_index as u32,
                     ],
                     mesh_area: mesh_area.0,
                 })
@@ -174,15 +174,15 @@ fn areas(renav: &PolygonNavmesh) -> Vec<u8> {
 
 
 fn deduplicate(
-    vertex_map: &mut HashMap<usize, PGVertex>,
+    vertex_map: &mut HashMap<u32, PGVertex>,
     threshold: f32,
-) -> HashMap<usize, usize> {
+) -> HashMap<u32, u32> {
     let threshold_sq = threshold * threshold;
 
     info!("vertex map size before: {}", vertex_map.len());
 
-    let mut index_mapping: HashMap<usize, HashSet<usize>> = HashMap::new();
-    let mut processed: HashSet<usize> = HashSet::new();
+    let mut index_mapping: HashMap<u32, HashSet<u32>> = HashMap::new();
+    let mut processed: HashSet<u32> = HashSet::new();
 
     for (k1, v1) in vertex_map.iter(){
 
@@ -190,7 +190,7 @@ fn deduplicate(
             continue;
         }
 
-        let mut cluster: HashSet<usize> = HashSet::new();
+        let mut cluster: HashSet<u32> = HashSet::new();
         cluster.insert(*k1);
 
 
@@ -224,7 +224,7 @@ fn deduplicate(
     //     info!("k: {} v: {:?}", k, v);
     // }
 
-    let mut reverse_map: HashMap<usize, usize> = HashMap::new();
+    let mut reverse_map: HashMap<u32, u32> = HashMap::new();
     for (min_idx, cluster) in index_mapping.iter() {
         for &idx in cluster {
             reverse_map.insert(idx, *min_idx);
@@ -237,7 +237,7 @@ fn deduplicate(
             continue;
         }
 
-        let mut polygons: Vec<usize> = Vec::new();
+        let mut polygons: Vec<u32> = Vec::new();
         for mv in cluster.iter(){
             for p in vertex_map.get(mv).unwrap().polygons.iter(){
                 polygons.push(*p);

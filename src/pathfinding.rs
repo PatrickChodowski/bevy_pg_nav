@@ -105,8 +105,8 @@ pub struct PathFinder {
     pub root_history: HashMap<Root, f32>,
     // pub from: Vec2,
     pub to: Vec2,
-    // pub polygon_from: usize,
-    pub polygon_to: usize,
+    // pub polygon_from: u32,
+    pub polygon_to: u32,
     pub navmesh: Arc<PGNavmesh>
 }
 
@@ -119,8 +119,8 @@ impl PathFinder {
 
     pub fn setup(
         navmesh: &PGNavmesh,
-        from: (Vec2, usize),    
-        to:   (Vec2, usize)
+        from: (Vec2, u32),    
+        to:   (Vec2, u32)
     ) -> Self {
         let mut path_finder = PathFinder{
             queue: BinaryHeap::with_capacity(15),
@@ -169,9 +169,9 @@ impl PathFinder {
     fn try_add_node(
         &mut self,
         root:       Vec2,
-        other_side: usize,
-        start:      (Vec2, usize),
-        end:        (Vec2, usize),
+        other_side: u32,
+        start:      (Vec2, u32),
+        end:        (Vec2, u32),
         node:       &Node,
     ){
         if self.navmesh.polygons.get(&other_side).is_none(){
@@ -302,7 +302,7 @@ impl PathFinder {
 
                 for other_side in other_sides.iter(){
 
-                    if other_side == &usize::MAX {continue}
+                    if other_side == &u32::MAX {continue}
                     let other_side_polygon = self.navmesh.polygon(other_side);
 
                     // prune edges that only lead to one other polygon, and not the target: dead end pruning
@@ -531,16 +531,16 @@ pub struct Node {
     pub path:                   SmallVec<[Vec2;10]>,
     pub root:                   Vec2,
     pub interval:               (Vec2, Vec2),
-    pub edge:                   (usize, usize),
-    pub polygon_from:           usize,
-    pub polygon_to:             usize,
+    pub edge:                   (u32, u32),
+    pub polygon_from:           u32,
+    pub polygon_to:             u32,
     pub distance_start_to_root: f32,
     pub heuristic:              f32,
 }
 
 impl Node {
     fn empty(
-        from: (Vec2, usize)
+        from: (Vec2, u32)
     ) -> Self {
         let empty_node = Node {
             path: SmallVec::new(),
@@ -732,7 +732,7 @@ enum SuccessorType {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Successor {
     interval: (Vec2, Vec2),
-    edge: [usize;2],
+    edge: [u32;2],
     typ: SuccessorType,
 }
 

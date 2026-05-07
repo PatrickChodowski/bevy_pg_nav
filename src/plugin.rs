@@ -11,7 +11,7 @@ use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::{GameState, TerrainChunk};
 
-
+use crate::multi_nav::PGMultiNavPlugin;
 use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
 use crate::recast_convert::convert_rerecast;
@@ -36,7 +36,8 @@ impl Plugin for PGNavPlugin {
             AvianBackendPlugin::default(),
             JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]),
             PGTerrainNavPlugin,
-            PGWaterNavPlugin
+            PGWaterNavPlugin,
+            PGMultiNavPlugin
         ))
         .insert_resource(NavResources{
             colliders_mapping: self.colliders_mapping,

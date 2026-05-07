@@ -14,8 +14,8 @@ impl BVH {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) enum BHVType {
-    Branch(Vec<usize>), // Nodes
-    Leaf(Vec<usize>)    // Navmesh Polygons
+    Branch(Vec<u32>), // Nodes
+    Leaf(Vec<u32>)    // Navmesh Polygons
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

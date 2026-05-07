@@ -4,6 +4,87 @@ use crate::prelude::{PGNavmesh, PGNavmeshType};
 use crate::prelude::Path;
 use crate::types::PGPolygon;
 
+
+pub (crate) struct PGMultiNavPlugin;
+
+impl Plugin for PGMultiNavPlugin {
+    fn build(&self, app: &mut App) {
+        app
+        .add_message::<ConnectNavs>()
+        .add_message::<DisconnectNavs>()
+        .add_observer(on_spawn_nav)
+        .add_observer(on_despawn_nav)
+        .add_systems(Update, connect_navs.run_if(on_message::<ConnectNavs>))
+        ;
+    }
+}
+
+fn on_spawn_nav(
+    trigger:    On<Add, PGNavmesh>,
+    navs:       Query<(Entity, &PGNavmesh)>,
+    mut writer: MessageWriter<ConnectNavs>,
+){
+
+    let Ok((a_entity, a_nav)) = navs.get(trigger.entity) else {return};
+
+    for (entity, nav) in navs.iter(){
+
+        if entity == a_entity {
+            continue;
+        }
+
+        let mut poly_pairs: Vec<(u32, u32)> = Vec::new();
+        for (a_poly_index, a_poly) in a_nav.polygons.iter(){
+            for (poly_index, poly) in nav.polygons.iter(){
+                if a_poly.intersects(poly, a_nav, nav){
+                    poly_pairs.push((*a_poly_index, *poly_index));
+                }
+            }
+        }
+
+        if poly_pairs.len() > 0 {
+            writer.write(ConnectNavs{
+                nav_entity1: entity,
+                nav_entity2: entity,
+                polygon_pairs: poly_pairs
+            });
+        }
+    }
+
+}
+
+
+fn on_despawn_nav(
+    trigger:    On<Remove, PGNavmesh>,
+    navs:       Query<(Entity, &PGNavmesh)>,
+    mut writer: MessageWriter<DisconnectNavs>,
+){
+    let Ok((r_entity, r_nav)) = navs.get(trigger.entity) else {return};
+
+    for (entity, nav) in navs.iter(){
+        if entity == r_entity {
+            continue;
+        }
+
+
+    }
+
+}
+
+fn connect_navs(
+    mut reader: MessageReader<ConnectNavs>,
+    mut navs:   Query<&mut PGNavmesh>,
+){
+    for msg in reader.read(){
+        let Ok([mut nav1, mut nav2]) = navs.get_many_mut([msg.nav_entity1, msg.nav_entity2]) else { continue };
+        let reversed: Vec<(u32, u32)> = msg.polygon_pairs.iter().map(|&(a, b)| (b, a)).collect();
+        nav1.conns.insert(msg.nav_entity2, msg.polygon_pairs.clone());
+        nav2.conns.insert(msg.nav_entity1, reversed);
+    }
+}
+
+
+
 // Helpers for managing search paths when there is multiple navigation meshes, types, etc. (Navigation mesh per tile.)
 
 // Current usages:
@@ -84,7 +165,7 @@ fn multi_nav_path_points(
     end:          &Vec2,
     agent_radius: f32,
     agent_types:  &Vec<PGNavmeshType>
-) -> Option<(Path, usize, usize)> {
+) -> Option<(Path, u32, u32)> {
 
     // Navmesh Entity, navmesh, polygon, loc
     let mut maybe_start_data: Option<(Entity, &PGNavmesh, &PGPolygon, Vec3)> = None;
@@ -136,7 +217,7 @@ fn multi_nav_path_points(
         );
     } else {
 
-        start_data.1.link(end_data.1, start, end);
+        start_data.1.path_multi_nav(end_data.1, start, end);
 
         // 1) Find best point that links both navmeshes relative to start and end
         // 2) Find route from start to link point
@@ -154,4 +235,18 @@ fn multi_nav_path_points(
 
 
     return None;
+}
+
+
+#[derive(Message)]
+struct ConnectNavs {
+    nav_entity1: Entity,
+    nav_entity2: Entity,
+    polygon_pairs: Vec<(u32, u32)> // polygon from entity1 and polygon from entity2
+}
+
+#[derive(Message)]
+struct DisconnectNavs {
+    nav_entity1: Entity,
+    nav_entity2: Entity
 }

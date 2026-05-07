@@ -7,6 +7,7 @@ use crate::bvh::{BVH, BHVType, BVHNode, aabb_intersects_triangle};
 use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
 use crate::types::{PGPolygon, PGVertex};
 
+
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize)]
 pub enum PGNavmeshType {
     Terrain,
@@ -15,13 +16,15 @@ pub enum PGNavmeshType {
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 pub struct PGNavmesh {
-    pub polygons:     HashMap<usize, PGPolygon>,
-    pub vertices:     HashMap<usize, PGVertex>,
-    pub search_limit: usize,
-    pub typ:          PGNavmeshType,
-    pub aabb:         AABB,
-    pub bvh:          BVH,
-    pub name:         String
+    pub (crate) polygons:     HashMap<u32, PGPolygon>,
+    pub (crate) vertices:     HashMap<u32, PGVertex>,
+    pub (crate) search_limit: u32,
+    pub (crate) typ:          PGNavmeshType,
+     #[serde(skip)]
+    pub (crate) conns:        HashMap<Entity, Vec<(u32, u32)>>,
+    // pub aabb:         AABB,
+    pub (crate) bvh:          BVH,
+    pub (crate) name:         String
 }
 
 impl Default for PGNavmesh {
@@ -32,8 +35,9 @@ impl Default for PGNavmesh {
             search_limit: 1000,
             typ: PGNavmeshType::Terrain,
             name: "test".to_string(),
-            aabb: AABB::default(),
-            bvh: BVH::empty()
+            // aabb: AABB::default(),
+            bvh: BVH::empty(),
+            conns: HashMap::new()
         }
     }
 }
@@ -41,10 +45,10 @@ impl Default for PGNavmesh {
 
 impl PGNavmesh {
 
-    pub fn aabb(&mut self){
-        let locs: Vec<Vec3> = self.vertices.iter().map(|(_k, v)| v.loc).collect::<Vec<Vec3>>();
-        self.aabb = AABB::from_vertices(&locs);
-    }
+    // pub fn aabb(&mut self){
+    //     let locs: Vec<Vec3> = self.vertices.iter().map(|(_k, v)| v.loc).collect::<Vec<Vec3>>();
+    //     self.aabb = AABB::from_vertices(&locs);
+    // }
 
     pub fn ray_intersection(&self, origin: &Vec3, direction: &Vec3) -> Option<(&PGPolygon, Vec3)> {
         let loc = origin.xz();
@@ -77,8 +81,8 @@ impl PGNavmesh {
     pub fn clamp_move(
         &self,
         target_pos: Vec2,
-        current_poly_index: usize
-    ) -> (Vec3, usize) {
+        current_poly_index: u32
+    ) -> (Vec3, u32) {
 
         let mut closest_point = target_pos;
         let mut min_dist_sq = f32::MAX;
@@ -110,10 +114,10 @@ impl PGNavmesh {
         &self,
         start:            &Vec2,
         end:              &Vec2,
-        start_polygon_id: usize,
-        end_polygon_id:   usize,
+        start_polygon_id: u32,
+        end_polygon_id:   u32,
         agent_radius:     f32
-    ) -> Option<(Path, usize, usize)>{
+    ) -> Option<(Path, u32, u32)>{
 
         if DEBUG {
             info!(" [Debug] find path between {:?} and {} (from {} to {})", 
@@ -172,17 +176,17 @@ impl PGNavmesh {
         start:        &Vec2, 
         end:          &Vec2,
         agent_radius: f32
-    ) -> Option<(Path, usize, usize)> {
+    ) -> Option<(Path, u32, u32)> {
         let start_polygon: &PGPolygon = self.has_point(start).map(|p| p.0).unwrap();
         let Some(end_polygon) = self.has_point(end).map(|p| p.0) else {return None};
         return self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
     }
 
-    pub fn vertex(&self, id: &usize) -> &PGVertex {
+    pub fn vertex(&self, id: &u32) -> &PGVertex {
         return self.vertices.get(id).expect(&format!("expected vertex {}", id));
     }
 
-    pub fn polygon(&self, id: &usize) -> &PGPolygon {
+    pub fn polygon(&self, id: &u32) -> &PGPolygon {
         return self.polygons.get(id).expect(&format!("expected polygon {}", id));
     }
 
@@ -212,7 +216,7 @@ impl PGNavmesh {
         let mut nodes: Vec<BVHNode> = Vec::new();
 
         for aabb in small_aabbs.iter(){
-            let mut node_polygons: Vec<usize> = Vec::new();
+            let mut node_polygons: Vec<u32> = Vec::new();
             for (polygon_id, polygon) in self.polygons.iter(){
                 let [a,b,c] = polygon.locs_2d(self);
                 if aabb_intersects_triangle(aabb, a,b,c){
@@ -231,8 +235,8 @@ impl PGNavmesh {
     }
 
     pub(crate) fn islands_removal(&mut self){
-        let mut visited: HashSet<usize> = HashSet::new();
-        let mut islands: Vec<Vec<usize>> = Vec::new();
+        let mut visited: HashSet<u32> = HashSet::new();
+        let mut islands: Vec<Vec<u32>> = Vec::new();
 
         for (polygon_id, _polygon) in self.polygons.iter(){
 
@@ -240,8 +244,8 @@ impl PGNavmesh {
                 continue;
             }
 
-            let mut island: Vec<usize> = Vec::new();
-            let mut queue: Vec<usize> = vec![*polygon_id];
+            let mut island: Vec<u32> = Vec::new();
+            let mut queue: Vec<u32> = vec![*polygon_id];
 
             while queue.len() > 0 {
 
@@ -253,7 +257,7 @@ impl PGNavmesh {
                 island.push(current);
 
                 for n_poly_id in self.polygon(&current).neighbours.iter(){
-                    if n_poly_id == &usize::MAX {
+                    if n_poly_id == &u32::MAX {
                         continue;
                     }
                     if visited.contains(n_poly_id){
@@ -268,8 +272,8 @@ impl PGNavmesh {
         }
 
         // Remove small islands
-        let mut polygons_to_rm: Vec<usize> = Vec::new();
-        let mut vertices_to_rm: Vec<usize> = Vec::new();
+        let mut polygons_to_rm: Vec<u32> = Vec::new();
+        let mut vertices_to_rm: Vec<u32> = Vec::new();
 
         const ISLAND_THRESHOLD: usize = 10;
         for island in islands.iter_mut(){
@@ -302,9 +306,9 @@ impl PGNavmesh {
         }
 
 
-        let mut polygons_to_rm: HashSet<usize> = HashSet::with_capacity(self.polygons.len());
-        let mut possible_vertices_to_rm: HashSet<usize> = HashSet::with_capacity(self.vertices.len());
-        let mut vertices_to_rm: HashSet<usize> = HashSet::with_capacity(self.vertices.len());
+        let mut polygons_to_rm: HashSet<u32> = HashSet::with_capacity(self.polygons.len());
+        let mut possible_vertices_to_rm: HashSet<u32> = HashSet::with_capacity(self.vertices.len());
+        let mut vertices_to_rm: HashSet<u32> = HashSet::with_capacity(self.vertices.len());
 
         // if all 3 vertices are below water, remove polygon
 
@@ -322,7 +326,7 @@ impl PGNavmesh {
 
             }
 
-            let mut low_count: usize = 0;
+            let mut low_count: u32 = 0;
 
             for v_index in polygon.vertices.iter(){
 
@@ -385,7 +389,7 @@ impl PGNavmesh {
 
     pub(crate) fn reorder_vertex_polygons(&mut self) {
 
-        let mut mapping_polygons: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut mapping_polygons: HashMap<u32, Vec<u32>> = HashMap::new();
 
         for (vertex_id, vertex) in self.vertices.iter() {
 
@@ -393,7 +397,7 @@ impl PGNavmesh {
             let mut v_polygons = vertex
                 .polygons
                 .iter()
-                .filter(|p| **p != usize::MAX)
+                .filter(|p| **p != u32::MAX)
                 .cloned()
                 .collect::<Vec<_>>();
 
@@ -407,7 +411,7 @@ impl PGNavmesh {
 
             v_polygons.dedup_by_key(|p| *p);
             if v_polygons.is_empty() {
-                v_polygons.push(usize::MAX);
+                v_polygons.push(u32::MAX);
             } else {
                 // Reintroduce empty markers
                 // For two following polygons on a vertex, check their previous / next vertices
@@ -416,7 +420,7 @@ impl PGNavmesh {
                 let first = v_polygons[0];
                 let last = *v_polygons.last().unwrap();
                 if first == last {
-                    v_polygons.push(usize::MAX);
+                    v_polygons.push(u32::MAX);
                 } else {
                     v_polygons = v_polygons
                         .windows(2)
@@ -438,7 +442,7 @@ impl PGNavmesh {
                                     false
                                 })
                             else {
-                                return vec![pair0, usize::MAX];
+                                return vec![pair0, u32::MAX];
                             };
                             let polygon1 = self.polygon(&pair1).vertices.clone();
                             let mut found = false;
@@ -453,11 +457,11 @@ impl PGNavmesh {
                                     false
                                 })
                             else {
-                                return vec![pair0, usize::MAX];
+                                return vec![pair0, u32::MAX];
                             };
 
                             if self.vertex(previous0).loc != self.vertex(next1).loc {
-                                vec![pair0, usize::MAX]
+                                vec![pair0, u32::MAX]
                             } else {
                                 vec![pair0]
                             }
@@ -479,14 +483,14 @@ impl PGNavmesh {
         origin: Vec3, 
         direction: Vec3, 
         len: f32,
-        origin_polygon: usize,
+        origin_polygon: u32,
     )  -> (bool, f32) {
 
-        let mut polys_to_check: Vec<&usize> = Vec::with_capacity(10);
-        let mut polys_buffer: Vec<&usize> = Vec::with_capacity(10);
+        let mut polys_to_check: Vec<&u32> = Vec::with_capacity(10);
+        let mut polys_buffer: Vec<&u32> = Vec::with_capacity(10);
 
-        let safety: usize = 5;
-        let mut i: usize = 0;
+        let safety: u32 = 5;
+        let mut i: u32 = 0;
 
         let Some(origin_poly) = self.polygons.get(&origin_polygon) else {return (false, 0.0);};
         polys_to_check.extend(origin_poly.neighbours.iter());
@@ -496,7 +500,7 @@ impl PGNavmesh {
             for poly_id in polys_to_check.iter(){
                 let Some(poly) = self.polygons.get(*poly_id) else {continue};
                 let (intersections, min_dist) = poly.ray_side_intersection(origin, direction, len, &self);
-                let blocker: bool = poly_id == &&usize::MAX;
+                let blocker: bool = poly_id == &&u32::MAX;
 
                 match (intersections, blocker) {
                     (0, _) => {continue; /* Wrong side */}
@@ -521,7 +525,7 @@ impl PGNavmesh {
         return (false, 0.0);
     }
 
-    pub fn find_nearest_point_from_outside(&self, origin: &Vec2) -> Option<(Vec2, usize)> {
+    pub fn find_nearest_point_from_outside(&self, origin: &Vec2) -> Option<(Vec2, u32)> {
         let mut best_point = None;
         let mut best_dist_sq = f32::INFINITY;
         let mut best_polygon_id = 0;
@@ -540,11 +544,11 @@ impl PGNavmesh {
         best_point.map(|p| (p, best_polygon_id))
     }
 
-    pub fn find_nearest_point_from(&self, origin: &Vec2, target: &Vec2) -> Option<(Vec2, usize)> {
+    pub fn find_nearest_point_from(&self, origin: &Vec2, target: &Vec2) -> Option<(Vec2, u32)> {
 
         let (start_polygon, _world_pos) = self.has_point(origin).unwrap();
-        let mut visited: HashSet<usize> = HashSet::new();
-        let mut to_visit: Vec<usize> = vec![start_polygon.index];
+        let mut visited: HashSet<u32> = HashSet::new();
+        let mut to_visit: Vec<u32> = vec![start_polygon.index];
         let mut best_point: Option<Vec2> = None;
         let mut best_dist = f32::INFINITY;
         let mut best_polygon_id = start_polygon.index;
@@ -588,7 +592,7 @@ impl PGNavmesh {
         return filename;
     }
 
-    pub(crate) fn link(
+    pub(crate) fn path_multi_nav(
         &self, 
         end_nav: &PGNavmesh, 
         start: &Vec2, 
