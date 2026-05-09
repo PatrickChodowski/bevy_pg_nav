@@ -593,6 +593,7 @@ impl PGNavmesh {
         return filename;
     }
 
+    // TODO: implement
     pub(crate) fn path_multi_nav(
         &self, 
         end_nav: &PGNavmesh, 
@@ -601,9 +602,11 @@ impl PGNavmesh {
         start_nav_entity: Entity,
         end_nav_entity: Entity,
         navs: &Query<(Entity, &PGNavmesh)>,
-    ) {
+        agent_radius: f32,
+        agent_types: &Vec<PGNavmeshType>
+    )  -> Option<(Path, u32, u32)> {
 
-        if let Some(nav_path) = search_navs_path(start_nav_entity, end_nav_entity, navs){
+        if let Some(nav_path) = search_navs_path(start_nav_entity, end_nav_entity, navs, agent_types){
 
 
             // self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
@@ -612,6 +615,7 @@ impl PGNavmesh {
         }
 
 
+        return None;
     }
 
     

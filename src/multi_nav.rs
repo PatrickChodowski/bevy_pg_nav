@@ -213,21 +213,20 @@ fn multi_nav_path_points(
         );
     } else {
 
-        start_data.1.path_multi_nav(
+    // Different navmeshes needing connections
+        return start_data.1.path_multi_nav(
             end_data.1, 
             start, 
             end,
             start_data.0,
             end_data.0,
-            &navs
+            &navs,
+            agent_radius,
+            agent_types
         );
-
-
 
     }
 
-
-    return None;
 }
 
 #[derive(Message)]
@@ -240,9 +239,10 @@ struct ConnectNavs {
 
 // Graph search for connections between navmesh A and navmesh B
 pub (crate) fn search_navs_path(
-    start: Entity,
-    end:   Entity,
-    navs:  &Query<(Entity, &PGNavmesh)>
+    start:       Entity,
+    end:         Entity,
+    navs:        &Query<(Entity, &PGNavmesh)>,
+    agent_types: &Vec<PGNavmeshType>
 ) -> Option<Vec<(Entity, Vec<(u32, u32)>)>> {
     if start == end { return Some(vec![(start, vec![])]); }
 
@@ -254,6 +254,10 @@ pub (crate) fn search_navs_path(
 
     while let Some((current, path)) = queue.pop_front() {
         let Ok((_nav_entity, nav)) = navs.get(current) else { continue };
+
+        if !agent_types.contains(&nav.typ){
+            continue;
+        }
 
         for (neighbour, pairs) in &nav.conns {
             if !visited.insert(*neighbour) { continue; }
