@@ -683,7 +683,7 @@ fn is_point_in_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
 
 
 /// Finds the closest point on a 2D triangle to a 2D point
-fn closest_point_on_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
+pub (crate) fn closest_point_on_triangle_2d(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
     // 1. If inside, return the point itself
     if is_point_in_triangle_2d(p, a, b, c) {
         return p;

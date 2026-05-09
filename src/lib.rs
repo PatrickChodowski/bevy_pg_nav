@@ -17,4 +17,5 @@ pub mod prelude {
     pub use crate::terrain::TerrainRayMeshData;
     pub use crate::types::{PGPolygon, PGVertex};
     pub use crate::pgnavmesh::{PGNavmesh, PGNavmeshType, find_point};
+    pub use crate::multi_nav::{multi_nav_path_points, multi_nav_clamp_move};
 }

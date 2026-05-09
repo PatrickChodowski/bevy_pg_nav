@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy::platform::collections::{HashSet};
 use std::collections::VecDeque;
 
-use crate::prelude::{PGNavmesh, PGNavmeshType};
-use crate::prelude::Path;
+use crate::pgnavmesh::{PGNavmesh, PGNavmeshType, closest_point_on_triangle_2d};
+use crate::pathfinding::Path;
 use crate::types::PGPolygon;
 
 
@@ -137,25 +137,68 @@ fn connect_navs(
 */
 
 
-// Scenarios:
-// start and end on the same nav
-// start and end on different nav
-// start and end on different nav type 
-// we may want to find the last point, check navmesh connection
+pub fn multi_nav_clamp_move(
+    current_nav_entity: Entity,
+    current_polygon_id: u32,
+    target:             Vec2,
+    navs:               &Query<(Entity, &PGNavmesh)>,
+) -> (Entity, Vec3, u32) {
 
-// Does Path need this info? 
-/*
-pub struct Path {
-    pub length: f32,
-    pub path: SmallVec<[Vec2;10]>,
+    let Ok((_nav_entity, current_nav)) = navs.get(current_nav_entity) else {panic!("Missing navmesh")};
+    let current_poly = current_nav.polygon(&current_polygon_id);
+
+    // If same polygon
+    if let Some(pos) = current_poly.has_point(target, &current_nav){
+        return (current_nav_entity, pos, current_polygon_id)
+    };
+
+    let mut candidates: Vec<(Entity, &PGNavmesh, u32)> = Vec::new();
+    
+    // Check neighbouring polygons from the same navmesh
+    for n in current_poly.neighbours.iter(){
+        candidates.push((current_nav_entity, current_nav, *n));
+    }
+
+    // Check if this polygon is in the navmesh connections to other navmesh
+    for (other_nav_entity, poly_pairs) in current_nav.conns.iter(){
+        let Ok((_entity, other_nav)) = navs.get(*other_nav_entity) else {continue};
+        for poly_pair in poly_pairs.iter(){
+            if poly_pair.0 == current_polygon_id {
+                candidates.push((*other_nav_entity, other_nav, poly_pair.1));
+            }
+        }
+    }
+
+    let mut closest_point: Vec2 = target;
+    let mut closest_point_height: f32 = 0.0;
+    let mut min_dist_sq: f32 = f32::MAX;
+    let mut closest_poly_index: u32 = current_polygon_id;
+    let mut closest_point_navmesh_entity = current_nav_entity;
+
+    // Search for the nearest point across all candidates
+    for (candidate_nav_entity, candidate_nav, candidate_polygon_id) in &candidates {
+        let candidate_polygon = candidate_nav.polygon(&candidate_polygon_id);
+        let [a, b, c] = candidate_polygon.locs_2d(candidate_nav);
+        let clamped_2d = closest_point_on_triangle_2d(target, a,b,c);
+        let dist_sq = clamped_2d.distance_squared(target);
+        if dist_sq < min_dist_sq {
+            min_dist_sq = dist_sq;
+            closest_point = clamped_2d;
+            closest_poly_index = *candidate_polygon_id;
+            closest_point_height = candidate_polygon.get_height(closest_point, &candidate_nav);
+            closest_point_navmesh_entity = *candidate_nav_entity;
+        }
+    }
+
+    return (
+        closest_point_navmesh_entity, 
+        Vec3::new(closest_point.x, closest_point_height, closest_point.y), 
+        closest_poly_index
+    );
 }
-*/
-// Probably not, but its needed during path finding
 
 
-
-
-fn multi_nav_path_points(
+pub fn multi_nav_path_points(
     navs:         &Query<(Entity, &PGNavmesh)>,
     start:        &Vec2, 
     end:          &Vec2,

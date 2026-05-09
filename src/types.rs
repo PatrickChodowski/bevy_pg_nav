@@ -96,6 +96,10 @@ impl PGPolygon {
 
     }
 
+    pub fn has_point(&self, p: Vec2, pgn: &PGNavmesh) -> Option<Vec3> {
+        return self.ray_intersection(&Vec3::new(p.x, 1000.0, p.y), &Vec3::NEG_Y, pgn);
+    }
+
     pub fn ray_intersection(
         &self, 
         origin:    &Vec3, 
