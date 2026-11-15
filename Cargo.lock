@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_pg_nav"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "avian3d",
  "avian_rerecast",
