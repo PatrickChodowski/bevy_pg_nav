@@ -60,6 +60,7 @@ fn on_generate_navmesh(
     terrains:     Query<Option<&Name>, (With<TerrainChunk>, With<Transform>, With<Mesh3d>)>,
     mut commands: Commands
 ){
+    info!("Triggered Generate Navmesh");
     let Ok(maybe_name) = terrains.get(trigger.plane_entity) else {return};
 
     if maybe_name.is_none(){
