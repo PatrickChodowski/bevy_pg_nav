@@ -249,7 +249,7 @@ fn on_ready_navmesh(
 
 // Inserts components of type. Separate system as it can also run when spawning navmesh from file
 fn on_spawn_navmesh(
-   trigger:       On<Add, PGNavmesh>,
+   trigger:       On<Add<PGNavmesh>>,
    mut commands:  Commands,
    navs:          Query<&PGNavmesh>
 ){

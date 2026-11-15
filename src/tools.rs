@@ -1,6 +1,5 @@
 use bevy::prelude::{Vec3A, Vec3};
-use bevy::math::Ray3d;
-use std::f32::EPSILON;
+use bevy::prelude::Ray3d;
 
 // use crate::plugin::ORIGIN_HEIGHT;
 
@@ -64,7 +63,7 @@ pub(crate) fn ray_triangle_intersection(
     let p_vec: Vec3A = ray.direction.cross(vector_v0_to_v2);
     let determinant: f32 = vector_v0_to_v1.dot(p_vec);
 
-    if determinant < EPSILON {
+    if determinant < f32::EPSILON {
         return None;
     }
 

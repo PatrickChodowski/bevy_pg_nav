@@ -21,7 +21,7 @@ impl Plugin for PGMultiNavPlugin {
 }
 
 fn on_spawn_nav(
-    trigger:    On<Add, PGNavmesh>,
+    trigger:    On<Add<PGNavmesh>>,
     navs:       Query<(Entity, &PGNavmesh)>,
     mut writer: MessageWriter<ConnectNavs>,
 ){
@@ -55,7 +55,7 @@ fn on_spawn_nav(
 }
 
 fn on_despawn_nav(
-    trigger:    On<Remove, PGNavmesh>,
+    trigger:    On<Remove<PGNavmesh>>,
     mut navs:   Query<(Entity, &mut PGNavmesh)>
 ){
     for (entity, mut nav) in navs.iter_mut(){
