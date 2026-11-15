@@ -10,7 +10,7 @@ use bevy_rerecast::prelude::*;
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::{GameState, TerrainChunk};
-
+use avian3d::PhysicsPlugins;
 use crate::multi_nav::PGMultiNavPlugin;
 use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
@@ -32,6 +32,7 @@ impl Plugin for PGNavPlugin {
         app
         .init_asset::<PGNavmesh>()
         .add_plugins((
+            PhysicsPlugins::default(),
             NavmeshPlugins::default(),
             AvianBackendPlugin::default(),
             JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]),

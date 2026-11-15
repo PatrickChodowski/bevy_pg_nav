@@ -7,6 +7,7 @@ use avian3d::prelude::{Collider, RigidBody};
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 use bevy_rerecast::generator::NavmeshGenerator;
 use bevy_rerecast::NavmeshSettings;
+use avian3d::prelude::*;
 
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::pgnavmesh::PGNavmeshType;
@@ -42,18 +43,28 @@ fn prepare_terrain_colliders(
 ){
     let Ok((_terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
-    info!("[NAV] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
+    info!("[NAV] [prepare_terrain_colliders] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let heightfield = extract_heightfield(&mesh);
-    let collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+
+    // info!("generate heightfield for terrain dims:{}", terrain.dims);
+    let heightfield_collider: Collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+
+    // let trimesh = heightfield_collider
+    //     .trimesh_builder()
+    //     .build()
+    //     .unwrap();
+
+    // let collider_trimesh = Collider::trimesh(trimesh.vertices, trimesh.indices);
 
     for (static_entity, static_transform, static_name) in statics.iter(){
         if let Some((collider, nav_object)) = (navres.colliders_mapping)(static_name.to_string()){
-            info!("Inserting collider for {}", static_name);
+            // info!("Inserting collider for {}", static_name);
             commands.entity(static_entity).insert((collider, RigidBody::Static, nav_object));
         }
     }
 
-    commands.entity(navgendata.plane_entity).insert((collider, RigidBody::Static));
+    // info!("Inserting collider for terrain: {:?}", collider_trimesh);
+    commands.entity(navgendata.plane_entity).insert((heightfield_collider, RigidBody::Static));
     commands.insert_resource(WaitColliders::new());
 }
 
@@ -63,7 +74,7 @@ struct WaitColliders {
 }
 impl WaitColliders {
     fn new() -> Self {
-        return WaitColliders{timer: Timer::from_seconds(0.5, TimerMode::Once)};
+        return WaitColliders{timer: Timer::from_seconds(1.0, TimerMode::Once)};
     }
 }
 
@@ -91,39 +102,41 @@ fn generate_terrain_navmesh_on_colliders_ready(
     mut commands:   Commands,
     mut navgendata: ResMut<NavmeshGenerationData>,
     navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
-
 ){
 
-    info!("[NAV] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
+    info!("[NAV] [on_colliders_ready] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let mut hs: HashSet<Entity> = HashSet::new();
-    hs.insert(navgendata.plane_entity);
+    // hs.insert(navgendata.plane_entity);
 
     for entity in navstatics.iter(){
         hs.insert(entity);
     }
 
-    let settings = NavmeshSettings {
-        filter: Some(hs),
-        walkable_climb: 1.0,
-        walkable_slope_angle: 55.0_f32.to_radians(),
-        agent_radius: 0.5,
-        agent_height: 0.1,
-        // min_region_size: 10,
-        // max_vertices_per_polygon: 20,
-        // max_simplification_error: 1.2,
-        // cell_size_fraction: 2.0,
-        // cell_height_fraction: 4.0,
-        up: Vec3::Y,
-        // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(terrain.dims.x * 0.5, 1.0, terrain.dims.y * 0.5))),
-        // merge_region_size: 100,
+    // let settings = NavmeshSettings {
+    //     filter: Some(hs),
+    //     walkable_climb: 1.0,
+    //     walkable_slope_angle: 55.0_f32.to_radians(),
+    //     agent_radius: 0.5,
+    //     agent_height: 1.2,
+    //     // min_region_size: 10,
+    //     // max_vertices_per_polygon: 20,
+    //     // max_simplification_error: 1.2,
+    //     // cell_size_fraction: 2.0,
+    //     // cell_height_fraction: 4.0,
+    //     up: Vec3::Y,
+    //     // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(terrain.dims.x * 0.5, 1.0, terrain.dims.y * 0.5))),
+    //     // merge_region_size: 100,
 
-        // min_region_size: // def: 8,
-        // merge_region_size: // def: 20,
-        // detail_sample_dist: 12.0, //def: 6.0
-        // detail_sample_max_error: 10.0, //def 1.0
-        // contour_flags: BuildContoursFlags::TESSELLATE_AREA_EDGES,
-        ..default()
-    };
+    //     // min_region_size: // def: 8,
+    //     // merge_region_size: // def: 20,
+    //     // detail_sample_dist: 12.0, //def: 6.0
+    //     // detail_sample_max_error: 10.0, //def 1.0
+    //     // contour_flags: BuildContoursFlags::TESSELLATE_AREA_EDGES,
+    //     ..default()
+    // };
+
+    let mut settings = NavmeshSettings::default();
+    settings.filter = Some(hs);
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Terrain, navmesh);
