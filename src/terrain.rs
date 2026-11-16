@@ -45,8 +45,6 @@ fn prepare_terrain_colliders(
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
     info!("[NAV] [prepare_terrain_colliders] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
     let heightfield = extract_heightfield(&mesh);
-
-    // info!("generate heightfield for terrain dims:{}", terrain.dims);
     let heightfield_collider: Collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
 
     // let trimesh = heightfield_collider
@@ -101,42 +99,22 @@ fn generate_terrain_navmesh_on_colliders_ready(
     mut generator:  NavmeshGenerator,
     mut commands:   Commands,
     mut navgendata: ResMut<NavmeshGenerationData>,
-    navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
+    // navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
 ){
 
     info!("[NAV] [on_colliders_ready] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
-    let mut hs: HashSet<Entity> = HashSet::new();
+    // let mut hs: HashSet<Entity> = HashSet::new();
     // hs.insert(navgendata.plane_entity);
-
-    for entity in navstatics.iter(){
-        hs.insert(entity);
-    }
-
-    // let settings = NavmeshSettings {
-    //     filter: Some(hs),
-    //     walkable_climb: 1.0,
-    //     walkable_slope_angle: 55.0_f32.to_radians(),
-    //     agent_radius: 0.5,
-    //     agent_height: 1.2,
-    //     // min_region_size: 10,
-    //     // max_vertices_per_polygon: 20,
-    //     // max_simplification_error: 1.2,
-    //     // cell_size_fraction: 2.0,
-    //     // cell_height_fraction: 4.0,
-    //     up: Vec3::Y,
-    //     // aabb: Some(Aabb3d::new(terrain_transform.translation, Vec3::new(terrain.dims.x * 0.5, 1.0, terrain.dims.y * 0.5))),
-    //     // merge_region_size: 100,
-
-    //     // min_region_size: // def: 8,
-    //     // merge_region_size: // def: 20,
-    //     // detail_sample_dist: 12.0, //def: 6.0
-    //     // detail_sample_max_error: 10.0, //def 1.0
-    //     // contour_flags: BuildContoursFlags::TESSELLATE_AREA_EDGES,
-    //     ..default()
-    // };
+    // for entity in navstatics.iter(){
+    //     hs.insert(entity);
+    // }
+    // settings.filter = Some(hs);
 
     let mut settings = NavmeshSettings::default();
-    settings.filter = Some(hs);
+    if let Some(ref terrain_settings) = navgendata.terrain_settings {
+        settings = terrain_settings.clone();
+    }
+
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Terrain, navmesh);

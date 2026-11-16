@@ -31,9 +31,8 @@ impl Plugin for PGWaterNavPlugin {
 #[derive(Event)]
 pub(crate) struct GenerateWaterNavmesh;
 
-
 fn generate_water_navmesh(
-    _trigger:          On<GenerateWaterNavmesh>,
+    _trigger:         On<GenerateWaterNavmesh>,
     terrains:         Query<(&Transform, &Mesh3d, &TerrainChunk)>,
     water_query:      Query<(&Transform, &WaterChunk)>,
     mut commands:     Commands,
@@ -142,25 +141,32 @@ fn on_water_navmesh_sources_ready(
     mut generator:       NavmeshGenerator,
     mut commands:        Commands,
     water_sources:       Query<Entity, With<WaterNavmeshSource>>,
-    mut navgendata: ResMut<NavmeshGenerationData>
+    mut navgendata:      ResMut<NavmeshGenerationData>
 ){
     let mut hs = HashSet::new();
     for water_mesh_entity in water_sources.iter(){
         hs.insert(water_mesh_entity);
     }
 
-    let settings = NavmeshSettings {
-        filter: Some(hs),
-        walkable_climb: 10.0,
-        walkable_slope_angle: 0.1_f32.to_radians(),
-        agent_radius: 1.0,
-        agent_height: 2.0,
-        max_vertices_per_polygon: 20,
-        max_simplification_error: 1.3,
-        min_region_size: 1,
-        up: Vec3::Y,
-        ..default()
-    };
+    // let settings = NavmeshSettings {
+    //     filter: Some(hs),
+    //     walkable_climb: 10.0,
+    //     walkable_slope_angle: 0.1_f32.to_radians(),
+    //     agent_radius: 1.0,
+    //     agent_height: 2.0,
+    //     max_vertices_per_polygon: 20,
+    //     max_simplification_error: 1.3,
+    //     min_region_size: 1,
+    //     up: Vec3::Y,
+    //     ..default()
+    // };
+
+    let mut settings = NavmeshSettings::default();
+    if let Some(ref water_settings) = navgendata.water_settings {
+        settings = water_settings.clone();
+    }
+    settings.filter = Some(hs);
+
     let navmesh = generator.generate(settings);
     commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Water, navmesh);

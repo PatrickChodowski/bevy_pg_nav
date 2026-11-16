@@ -49,7 +49,6 @@ impl Plugin for PGNavPlugin {
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
         .add_systems(Update, check_navgendata.run_if(resource_exists_and_changed::<NavmeshGenerationData>))
-        .add_systems(OnExit(GameState::Play), clear)
         .add_systems(Update, toggle_visibility) //.run_if(resource_changed::<NavResources>))
         ;
     }
@@ -71,7 +70,11 @@ fn on_generate_navmesh(
     let plane_name = maybe_name.unwrap().to_string();
 
     info!("Generate Navmesh for plane entity: {} name: {}", trigger.plane_entity, plane_name);
-    commands.insert_resource(NavmeshGenerationData::new(trigger.plane_entity, plane_name));
+    let mut ngd = NavmeshGenerationData::new(trigger.plane_entity, plane_name);
+    ngd.terrain_settings = trigger.terrain_settings.clone();
+    ngd.water_settings = trigger.water_settings.clone();
+
+    commands.insert_resource(ngd);
     commands.trigger(GenerateTerrainNavmesh);
     commands.trigger(GenerateWaterNavmesh);
 }
@@ -113,20 +116,6 @@ fn check_navgendata(
 
 }
 
-
-
-fn clear(
-    mut commands: Commands,
-    navs:         Query<Entity, With<PGNavmesh>>
-){
-    for entity in navs.iter(){
-        commands.entity(entity).despawn();
-    }
-
-    commands.remove_resource::<NavmeshGenerationData>();
-
-}
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum NavStaticType {
     Navigable(f32), // Yoffset
@@ -154,20 +143,26 @@ pub struct NavmeshTerrain;
 
 #[derive(Event)]
 pub struct GenerateNavMesh {
-    pub plane_entity: Entity
+    pub plane_entity: Entity,
+    pub terrain_settings: Option<NavmeshSettings>,
+    pub water_settings: Option<NavmeshSettings>
 }
 
+// Resource existing only during navmesh creation. Removed after finish
 #[derive(Resource, Debug)]
 pub (crate) struct NavmeshGenerationData {
     recast_handles: HashMap<PGNavmeshType, (Option<Handle<Navmesh>>, bool)>,
     name: String,
-    pub(crate) plane_entity: Entity
+    pub(crate) plane_entity: Entity,
+    pub(crate) terrain_settings: Option<NavmeshSettings>,
+    pub(crate) water_settings: Option<NavmeshSettings>,
 }
 impl NavmeshGenerationData {
     pub(crate) fn new(
         plane_entity: Entity, 
         name: String
     ) -> Self {
+        info!("New Navmesh Generation Data");
         let ngd = NavmeshGenerationData {
             recast_handles: HashMap::from(
                 [
@@ -176,7 +171,9 @@ impl NavmeshGenerationData {
                 ]
             ),
             name: name.clone(),
-            plane_entity
+            plane_entity,
+            terrain_settings: None,
+            water_settings: None
         };
         return ngd;
     }
