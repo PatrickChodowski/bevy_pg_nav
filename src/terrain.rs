@@ -7,12 +7,10 @@ use avian3d::prelude::{Collider, RigidBody};
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 use bevy_rerecast::generator::NavmeshGenerator;
 use bevy_rerecast::NavmeshSettings;
-use avian3d::prelude::*;
 
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::pgnavmesh::PGNavmeshType;
 use crate::plugin::{NavResources, NavmeshGenerationData};
-use crate::plugin::NavStatic;
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 
@@ -54,7 +52,7 @@ fn prepare_terrain_colliders(
 
     // let collider_trimesh = Collider::trimesh(trimesh.vertices, trimesh.indices);
 
-    for (static_entity, static_transform, static_name) in statics.iter(){
+    for (static_entity, _static_transform, static_name) in statics.iter(){
         if let Some((collider, nav_object)) = (navres.colliders_mapping)(static_name.to_string()){
             // info!("Inserting collider for {}", static_name);
             commands.entity(static_entity).insert((collider, RigidBody::Static, nav_object));

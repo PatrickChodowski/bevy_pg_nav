@@ -9,7 +9,7 @@ use bevy::platform::collections::HashMap;
 use bevy_rerecast::prelude::*;
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
-use bevy_pg_core::prelude::{GameState, TerrainChunk};
+use bevy_pg_core::prelude::TerrainChunk;
 use avian3d::PhysicsPlugins;
 use crate::multi_nav::PGMultiNavPlugin;
 use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};

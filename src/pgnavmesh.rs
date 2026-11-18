@@ -17,15 +17,15 @@ pub enum PGNavmeshType {
 
 #[derive(Component, Clone, Debug, bevy::asset::Asset, bevy::reflect::TypePath, Serialize, Deserialize)]
 pub struct PGNavmesh {
-    pub (crate) polygons:     HashMap<u32, PGPolygon>,
-    pub (crate) vertices:     HashMap<u32, PGVertex>,
-    pub (crate) search_limit: u32,
-    pub (crate) typ:          PGNavmeshType,
+    pub polygons:     HashMap<u32, PGPolygon>,
+    pub vertices:     HashMap<u32, PGVertex>,
+    pub search_limit: u32,
+    pub typ:          PGNavmeshType,
      #[serde(skip)]
-    pub (crate) conns:        HashMap<Entity, Vec<(u32, u32)>>,
+    pub conns:        HashMap<Entity, Vec<(u32, u32)>>,
     // pub aabb:         AABB,
-    pub (crate) bvh:          BVH,
-    pub (crate) name:         String
+    pub bvh:          BVH,
+    pub name:         String
 }
 
 impl Default for PGNavmesh {
@@ -296,6 +296,7 @@ impl PGNavmesh {
 
     }
 
+    #[allow(unused)]
     pub(crate) fn cleanup_lower(&mut self, cutoff_height: f32){
 
         if self.typ != PGNavmeshType::Terrain {
