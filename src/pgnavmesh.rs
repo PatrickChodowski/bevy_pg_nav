@@ -9,8 +9,9 @@ use crate::multi_nav::search_navs_path;
 use crate::types::{PGPolygon, PGVertex};
 
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize, Default)]
 pub enum PGNavmeshType {
+    #[default]
     Terrain,
     Water
 }

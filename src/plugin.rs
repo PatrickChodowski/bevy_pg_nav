@@ -18,7 +18,7 @@ use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
 pub struct PGNavPlugin{
-    pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+    // pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
 }
 
 #[derive(Resource)]
@@ -40,10 +40,10 @@ impl Plugin for PGNavPlugin {
             PGWaterNavPlugin,
             PGMultiNavPlugin
         ))
-        .insert_resource(NavResources{
-            colliders_mapping: self.colliders_mapping,
-            visible: false
-        })
+        // .insert_resource(NavResources{
+        //     colliders_mapping: self.colliders_mapping,
+        //     visible: false
+        // })
         .insert_resource(NavHandlesHolders::new())
         .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
