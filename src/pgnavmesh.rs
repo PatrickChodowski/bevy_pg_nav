@@ -7,6 +7,11 @@ use crate::bvh::{BVH, BHVType, BVHNode, aabb_intersects_triangle};
 use crate::pathfinding::{Path, SearchStep, PathFinder, DEBUG};
 use crate::multi_nav::search_navs_path;
 use crate::types::{PGPolygon, PGVertex};
+use std::cell::RefCell;
+thread_local! {
+    /// One reusable finder per thread: buffers are cleared, not reallocated, on each query.
+    static FINDER: RefCell<PathFinder> = RefCell::new(PathFinder::default());
+}
 
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect, Serialize, Deserialize, Default)]
@@ -114,16 +119,17 @@ impl PGNavmesh {
 
     pub(crate) fn path_between_polygons(
         &self,
-        start:            &Vec2,
-        end:              &Vec2,
+        start: &Vec2,
+        end: &Vec2,
         start_polygon_id: u32,
-        end_polygon_id:   u32,
-        agent_radius:     f32
-    ) -> Option<(Path, u32, u32)>{
-
+        end_polygon_id: u32,
+        agent_radius: f32,
+    ) -> Option<(Path, u32, u32)> {
         if DEBUG {
-            info!(" [Debug] find path between {:?} and {} (from {} to {})", 
-            start_polygon_id, end_polygon_id, start, end);
+            info!(
+                " [Debug] find path between {} and {} (polygons {} to {})",
+                start, end, start_polygon_id, end_polygon_id
+            );
         }
 
         if start_polygon_id == end_polygon_id {
@@ -137,40 +143,37 @@ impl PGNavmesh {
             return Some((path, start_polygon_id, end_polygon_id));
         }
 
-        let mut path_finder = PathFinder::setup(
-            self,
-            (*start, start_polygon_id),
-            (*end, end_polygon_id)
-        );
+        FINDER.with(|cell| {
+            let mut finder = cell.borrow_mut();
+            finder.start(
+                self,
+                (*start, start_polygon_id),
+                (*end, end_polygon_id),
+            );
 
-        for _s in 0..self.search_limit {
-            if DEBUG {
-                info!(" [Debug] {}", _s);
-            }
-             match path_finder.search() {
+            match finder.run(self, self.search_limit) {
                 SearchStep::Found(path) => {
-                    let offset_path = path.offset_inward(*start, agent_radius);
                     if DEBUG {
                         info!(" [Debug] found");
                     }
-                    
-                    return Some((offset_path, start_polygon_id, end_polygon_id));
+                    let offset_path = path.offset_inward(*start, agent_radius);
+                    Some((offset_path, start_polygon_id, end_polygon_id))
                 }
                 SearchStep::NotFound => {
                     if DEBUG {
                         info!(" [Debug] not found");
                     }
-                    return None;
+                    None
                 }
-                SearchStep::Continue => {}
+                SearchStep::Aborted => {
+                    if DEBUG {
+                        info!(" [Debug] Reached pathfinding limit");
+                    }
+                    None
+                }
+                SearchStep::Continue => None, // run() never returns this
             }
-        }
-        if DEBUG {
-            info!(" [Debug] Reached pathfinding limit");
-        }
-
-        return None;
-
+        })
     }
 
     pub fn path_points(

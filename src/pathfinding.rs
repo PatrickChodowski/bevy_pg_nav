@@ -101,356 +101,238 @@ impl Path {
     }
 }
 
+const NO_PARENT: u32 = u32::MAX;
+
 pub enum SearchStep {
     Found(Path),
     NotFound,
+    /// run() hit its expansion budget.
+    Aborted,
     Continue,
 }
 
+#[derive(Default)]
 pub struct PathFinder {
-    pub queue: BinaryHeap<Node>,
-    pub node_buffer: Vec<Node>,
-    pub root_history: HashMap<Root, f32>,
-    // pub from: Vec2,
-    pub to: Vec2,
-    // pub polygon_from: u32,
-    pub polygon_to: u32,
-    pub navmesh: Arc<PGNavmesh>
+    arena: Vec<Node>,
+    queue: BinaryHeap<HeapEntry>,
+    node_buffer: Vec<u32>,
+    root_history: HashMap<Root, f32>,
+    visited: Vec<u32>,
+    to: Vec2,
+    polygon_to: u32,
 }
-
 
 impl PathFinder {
     #[allow(dead_code)]
     pub fn best(&self) -> Option<&Node> {
-        return self.queue.peek();
+        self.queue.peek().map(|e| &self.arena[e.idx as usize])
     }
 
-    pub fn setup(
-        navmesh: &PGNavmesh,
-        from: (Vec2, u32),    
-        to:   (Vec2, u32)
-    ) -> Self {
-        let mut path_finder = PathFinder{
-            queue: BinaryHeap::with_capacity(15),
-            node_buffer: Vec::with_capacity(10),
-            root_history: HashMap::default(),
-            // from: from.0,
-            to: to.0,
-            // polygon_from: from.1,
-            polygon_to: to.1,
-            navmesh: Arc::new(navmesh.clone())
-        };
+    pub fn start(&mut self, nm: &PGNavmesh, from: (Vec2, u32), to: (Vec2, u32)) {
+        self.arena.clear();
+        self.queue.clear();
+        self.node_buffer.clear();
+        self.root_history.clear();
+        self.visited.clear();
+        self.to = to.0;
+        self.polygon_to = to.1;
 
-        let empty_node = Node::empty(from);
-        let starting_polygon: &&PGPolygon = &navmesh.polygon(&from.1);
+        // Node 0 is the empty start node.
+        self.arena.push(Node {
+            parent: NO_PARENT,
+            new_root: false,
+            root: from.0,
+            interval: (Vec2::ZERO, Vec2::ZERO),
+            edge: (0, 0),
+            polygon_from: from.1,
+            polygon_to: from.1,
+            distance_start_to_root: 0.0,
+            heuristic: 0.0,
+        });
+
+        let starting_polygon = nm.polygon(&from.1);
 
         for edge in starting_polygon.edges_index() {
-
-            let start: &PGVertex = navmesh.vertex(&edge[0]);
-            let end: &PGVertex = navmesh.vertex(&edge[1]);
-
+            let start: &PGVertex = nm.vertex(&edge[0]);
+            let end: &PGVertex = nm.vertex(&edge[1]);
             let other_sides = start.common(&end, &from.1);
+
             if DEBUG {
-                info!(" [debug] other sides: {:?} between start vertex: {} and end vertex: {}", other_sides, start.index, end.index);
+                info!(" [debug] other sides: {:?} between {} and {}", other_sides, start.index, end.index);
             }
 
-            for other_side in other_sides.iter(){
-
-                path_finder.try_add_node(
+            for other_side in other_sides.iter() {
+                self.try_add_node(
+                    nm,
+                    0,
                     from.0,
                     *other_side,
                     (start.xz(), edge[0]),
                     (end.xz(), edge[1]),
-                    &empty_node,
                 );
-                
             }
-
         }
 
-        path_finder.flush_nodes();
-        return path_finder;
-
+        self.flush_nodes();
     }
-
 
     fn try_add_node(
         &mut self,
-        root:       Vec2,
+        nm: &PGNavmesh,
+        parent_idx: u32,
+        root: Vec2,
         other_side: u32,
-        start:      (Vec2, u32),
-        end:        (Vec2, u32),
-        node:       &Node,
-    ){
-        if self.navmesh.polygons.get(&other_side).is_none(){
-            if DEBUG {
-                info!(" [debug] error node");
-            }
+        start: (Vec2, u32),
+        end: (Vec2, u32),
+    ) {
+        if !nm.polygons.contains_key(&other_side) {
             return;
         }
 
-        let mut new_f = node.distance_start_to_root;
-        let mut path = node.path.clone();
+        let parent = self.arena[parent_idx as usize];
 
-        if root != node.root {
-            path.push(root);
-            new_f += node.root.distance(root);
+        let new_root = Root(root) != Root(parent.root);
+        let mut g = parent.distance_start_to_root;
+        if new_root {
+            g += parent.root.distance(root);
         }
 
-        let heuristic_to_end: f32 = heuristic(root, self.to, (start.0, end.0));
-        
-        if new_f.is_nan() || heuristic_to_end.is_nan() {
-            if DEBUG {
-                info!(" [debug] newf or heuristic to end is nan");
-            }
+        let h = heuristic(root, self.to, (start.0, end.0));
+        if g.is_nan() || h.is_nan() {
             return;
         }
 
-        let new_node = Node {
-            path,
-            root,
-            interval: (start.0, end.0),
-            edge: (start.1, end.1),
-            polygon_from: node.polygon_to,
-            polygon_to: other_side,
-            distance_start_to_root: new_f,
-            heuristic: heuristic_to_end,
-        };
-
-        match self.root_history.entry(Root(root)) {
+        // Keep the node only if it improves (or ties) the best known g for this root.
+        let keep = match self.root_history.entry(Root(root)) {
             Entry::Occupied(mut o) => {
-                if o.get() < &new_node.distance_start_to_root {
-                    // println!("x already got a better path");
+                if *o.get() < g {
+                    false
                 } else {
-                    o.insert(new_node.distance_start_to_root);
-                    self.node_buffer.push(new_node);
+                    o.insert(g);
+                    true
                 }
             }
             Entry::Vacant(v) => {
-                v.insert(new_node.distance_start_to_root);
-                self.node_buffer.push(new_node);
+                v.insert(g);
+                true
             }
+        };
+        if !keep {
+            return;
         }
-        
-    }
 
-    pub fn search(&mut self) -> SearchStep {
-        if let Some(next_node) = self.pop_node() {
-
-            if DEBUG {
-                info!(" [debug] popped off: {:?} ({})", next_node, next_node.polygon_from);
-                info!(" [debug] Root history: {:?}", self.root_history);
-            }
-            if let Some(o) = self.root_history.get(&Root(next_node.root)) {
-                if o < &next_node.distance_start_to_root {
-                    return SearchStep::Continue;
-                }
-            }
-            if next_node.polygon_to == self.polygon_to {
-                let mut path = next_node.path;
-
-                if let Some(turn) = turning_point(next_node.root, self.to, next_node.interval) {
-                    if DEBUG {
-                        info!(" [debug] New turn: {}", turn);  
-                    }
-                    path.push(turn);
-                }
-
-                let complete = next_node.polygon_to == self.polygon_to;
-                if complete {
-                    path.push(self.to);
-                }
-
-                return SearchStep::Found(Path {
-                    path,
-                    length: next_node.distance_start_to_root + next_node.heuristic
-                });
-            }
-            self.successors(next_node);
-            return SearchStep::Continue;
-        } else {
-            return SearchStep::NotFound
-        }
+        let idx = self.arena.len() as u32;
+        self.arena.push(Node {
+            parent: parent_idx,
+            new_root,
+            root,
+            interval: (start.0, end.0),
+            edge: (start.1, end.1),
+            polygon_from: parent.polygon_to,
+            polygon_to: other_side,
+            distance_start_to_root: g,
+            heuristic: h,
+        });
+        self.node_buffer.push(idx);
     }
 
     #[inline(always)]
     fn flush_nodes(&mut self) {
-        self.queue.extend(self.node_buffer.drain(..));
+        for idx in self.node_buffer.drain(..) {
+            let n = &self.arena[idx as usize];
+            self.queue.push(HeapEntry {
+                f: n.distance_start_to_root + n.heuristic,
+                g: n.distance_start_to_root,
+                idx,
+            });
+        }
     }
-    #[inline(always)]
-    fn pop_node(&mut self) -> Option<Node> {
-        self.queue.pop()
-    }
 
-    #[inline(always)]
-    fn successors(&mut self, mut node: Node) {
-        let mut visited = HashSet::new();
-        loop {
-            for successor in self.edges_between(&node).iter() {
-                let [successor_edge_0, successor_edge_1] = successor.edge;
-                let start: &PGVertex = self.navmesh.vertex(&successor_edge_0);
-                let end: &PGVertex = self.navmesh.vertex(&successor_edge_1);
-                let start_loc: Vec2 = start.xz();
-                let end_loc: Vec2 = end.xz();
-                let other_sides = start.common(&end, &node.polygon_to);
-
-                if other_sides.len() == 0 {
-                    if DEBUG {
-                        info!(" [debug] No ends: no Successors otherside available between {:?} and {:?} polygon_to: {}", start, end, &node.polygon_to);
-                    }
-                    continue;
-                }
-
-                if successor.interval.0.distance_squared(successor.interval.1) < f32::EPSILON {
-                    if DEBUG {
-                        info!("  [debug] Successor distance interval too short");
-                    }
-                    continue;
-                }
-
-                for other_side in other_sides.iter(){
-
-                    if other_side == &u32::MAX {continue}
-                    let other_side_polygon = self.navmesh.polygon(other_side);
-
-                    // prune edges that only lead to one other polygon, and not the target: dead end pruning
-                    if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1{
-                        if DEBUG {
-                            info!(" [debug] Dead End: Prune edges leading to only one polygon that is not target");
-                        }
-                        continue;
-                    }
-
-                    if node.polygon_from == *other_side {
-                        if DEBUG {
-                            info!(" [debug] If other side is polygon from: not going back");
-                        }
-                        continue;
-                    }
-
-                    const EPSILON: f32 = 1.0e-10;
-
-                    let root: Vec2 = match successor.typ {
-                        SuccessorType::RightNonObservable => {
-                            if successor.interval.0.distance_squared(start_loc) > EPSILON {
-                                continue;
-                            }
-                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.0).unwrap();
-                            let is_corner = vertex.is_corner();
-                            let dist = vertex.xz().distance_squared(node.interval.0);
-
-                            // let interval_dist = node.interval.0.distance_squared(node.interval.1);
-
-                            if is_corner && dist< EPSILON{
-                                node.interval.0
-                            } else {
-                                continue;
-                            }
-                        }
-                        SuccessorType::Observable => node.root,
-                        SuccessorType::LeftNonObservable => {
-                            if (successor.interval.1).distance_squared(end_loc) > EPSILON {
-                                continue;
-                            }
-                            let vertex: &PGVertex = self.navmesh.vertices.get(&node.edge.1).unwrap();
-                            let dist = vertex.xz().distance_squared(node.interval.1);
-                            let is_corner = vertex.is_corner();
-                            if is_corner && dist < EPSILON{
-                                node.interval.1
-                            } else {
-                                continue;
-                            }
-                        }
-                    };
-
-                    if root != node.root {
-                        if DEBUG {
-                            info!(" [debug]  New root: {:?}", root);
-                        }
-                    }
-
-
-                    // ZERO LENGTH EDGE
-                    if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
-                        continue;
-                    }
-
-
-                    self.try_add_node(
-                        root,
-                        *other_side,
-                        (successor.interval.0, successor_edge_0), //start
-                        (successor.interval.1, successor_edge_1), // end
-                        &node,
-                    );
-                }
+    /// Walks the parent chain once and returns the root points in order.
+    fn build_path(&self, mut idx: u32) -> SmallVec<[Vec2; 10]> {
+        let mut path: SmallVec<[Vec2; 10]> = SmallVec::new();
+        while idx != NO_PARENT {
+            let n = &self.arena[idx as usize];
+            if n.new_root {
+                path.push(n.root);
             }
+            idx = n.parent;
+        }
+        path.reverse();
+        path
+    }
 
-            if self.node_buffer.len() == 1 && self.node_buffer[0].polygon_to != self.polygon_to {
-                if DEBUG {
-                    info!(" [debug] ONLY ONE node in node_buffer");
-                }
-                let previous_node = node;
-                node = self.node_buffer.drain(..).next().unwrap();
+    /// One expansion step.
+    pub fn search(&mut self, nm: &PGNavmesh) -> SearchStep {
+        let Some(entry) = self.queue.pop() else {
+            return SearchStep::NotFound;
+        };
+        let node = self.arena[entry.idx as usize];
 
-                if node.root == previous_node.root
-                    && node.polygon_to == previous_node.polygon_from
-                    && node.polygon_from == previous_node.polygon_to
-                    && node.interval.0 == previous_node.interval.1
-                    && node.interval.1 == previous_node.interval.0
-                {
-                    // panic!("going the exact reverse way as we went into this polygon");
-                    // going the exact reverse way as we went into this polygon
-                    // TODO: shouldn't happen, identify cases that trigger this
-                    break;
-                }
-                if !visited.insert(node.polygon_to) {
-                    // infinite loop, exit now
-                    // panic!("infinite loop, exit now");
-                    break;
-                }
-            } else {
-                break;
+        if DEBUG {
+            info!(" [debug] popped off: {:?}", node);
+        }
+
+        if let Some(best) = self.root_history.get(&Root(node.root)) {
+            if *best < node.distance_start_to_root {
+                return SearchStep::Continue; // a better path to this root exists
             }
         }
-        self.flush_nodes();
+
+        if node.polygon_to == self.polygon_to {
+            let mut path = self.build_path(entry.idx);
+            if let Some(turn) = turning_point(node.root, self.to, node.interval) {
+                path.push(turn);
+            }
+            path.push(self.to);
+            return SearchStep::Found(Path {
+                path,
+                length: node.distance_start_to_root + node.heuristic,
+            });
+        }
+
+        self.successors(nm, entry.idx);
+        SearchStep::Continue
     }
 
+    /// Runs until a result, or gives up after `max_expansions` pops.
+    pub fn run(&mut self, nm: &PGNavmesh, max_expansions: u32) -> SearchStep {
+        for _ in 0..max_expansions {
+            match self.search(nm) {
+                SearchStep::Continue => {}
+                done => return done,
+            }
+        }
+        SearchStep::Aborted
+    }
 
-    #[inline(always)]
-    fn edges_between(&self, node: &Node) -> SmallVec<[Successor; 10]> {
+ #[inline(always)]
+    fn edges_between(nm: &PGNavmesh, node: &Node) -> SmallVec<[Successor; 10]> {
         let mut successors = SmallVec::new();
 
-        let polygon = self.navmesh.polygon(&node.polygon_to);
-        let edge: Vec2 = self.navmesh.vertices[&node.edge.1].xz();
-        // let right_index: usize = polygon.vertices.iter().enumerate()
-        //     .find(|(_, v_index)| {self.navmesh.vertex(v_index).xz().distance_squared(edge) < 0.001})
-        //     .map(|(i, _)| i)
-        //     .unwrap_or_else(|| {
-        //             let mut distances = polygon
-        //                 .vertices
-        //                 .iter()
-        //                 .map(|v_index| {(self.navmesh.vertex(v_index).xz()).distance_squared(edge)})
-        //                 .enumerate()
-        //                 .collect::<Vec<_>>();
-        //             distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        //             distances.first().unwrap().0
-        //     })+ 1;
-
-        let right_index = polygon
-            .vertices
-            .iter()
-            .position(|v| *v == node.edge.1)
-            .expect("node edge vertex must belong to its polygon") + 1;
-
+        let polygon = nm.polygon(&node.polygon_to);
+        let edge: Vec2 = nm.vertices[&node.edge.1].xz();
+        let right_index: usize = polygon.vertices.iter().enumerate()
+            .find(|(_, v_index)| {nm.vertex(v_index).xz().distance_squared(edge) < 0.001})
+            .map(|(i, _)| i)
+            .unwrap_or_else(|| {
+                    let mut distances = polygon
+                        .vertices
+                        .iter()
+                        .map(|v_index| {(nm.vertex(v_index).xz()).distance_squared(edge)})
+                        .enumerate()
+                        .collect::<Vec<_>>();
+                    distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                    distances.first().unwrap().0
+            })+ 1;
 
         let left_index = polygon.vertices.len() + right_index - 2;
         let mut typ = SuccessorType::RightNonObservable;
 
         for [edge0, edge1] in polygon.circular_edges_index(right_index..=left_index) {
 
-            let mut start_point = self.navmesh.vertex(&edge0).xz();
-            let end_point  = self.navmesh.vertex(&edge1).xz();
+            let mut start_point = nm.vertex(&edge0).xz();
+            let end_point  = nm.vertex(&edge1).xz();
             let edge_side = start_point.side((node.root, node.interval.0));
 
             match edge_side{
@@ -537,46 +419,186 @@ impl PathFinder {
         return successors;
     }
 
+    fn successors(&mut self, nm: &PGNavmesh, start_idx: u32) {
+        self.visited.clear();
+        let mut node_idx = start_idx;
+        let mut node = self.arena[node_idx as usize];
+
+        loop {
+            let right_vertex = nm.vertex(&node.edge.0);
+            let left_vertex = nm.vertex(&node.edge.1);
+
+            for successor in Self::edges_between(nm, &node).iter() {
+                let [edge_0, edge_1] = successor.edge;
+                let start: &PGVertex = nm.vertex(&edge_0);
+                let end: &PGVertex = nm.vertex(&edge_1);
+                let start_loc = start.xz();
+                let end_loc = end.xz();
+                let other_sides = start.common(&end, &node.polygon_to);
+
+                if other_sides.len() == 0 {
+                    continue;
+                }
+                if successor.interval.0.distance_squared(successor.interval.1) < MIN_INTERVAL_SQ {
+                    continue;
+                }
+
+                for other_side in other_sides.iter() {
+                    if *other_side == u32::MAX {
+                        continue;
+                    }
+                    let other_side_polygon = nm.polygon(other_side);
+
+                    // Dead-end pruning: leads to one polygon only, and it isn't the target.
+                    if self.polygon_to != *other_side && other_side_polygon.neighbours.len() == 1 {
+                        continue;
+                    }
+                    // Don't walk back where we came from.
+                    if node.polygon_from == *other_side {
+                        continue;
+                    }
+
+                    let root: Vec2 = match successor.typ {
+                        SuccessorType::RightNonObservable => {
+                            if successor.interval.0.distance_squared(start_loc) > POINT_EPS_SQ {
+                                continue;
+                            }
+                            let at_corner = right_vertex.xz().distance_squared(node.interval.0) < POINT_EPS_SQ;
+                            if right_vertex.is_corner() && at_corner {
+                                node.interval.0
+                            } else {
+                                continue;
+                            }
+                        }
+                        SuccessorType::Observable => node.root,
+                        SuccessorType::LeftNonObservable => {
+                            if successor.interval.1.distance_squared(end_loc) > POINT_EPS_SQ {
+                                continue;
+                            }
+                            let at_corner = left_vertex.xz().distance_squared(node.interval.1) < POINT_EPS_SQ;
+                            if left_vertex.is_corner() && at_corner {
+                                node.interval.1
+                            } else {
+                                continue;
+                            }
+                        }
+                    };
+
+                    self.try_add_node(
+                        nm,
+                        node_idx,
+                        root,
+                        *other_side,
+                        (successor.interval.0, edge_0),
+                        (successor.interval.1, edge_1),
+                    );
+                }
+            }
+
+            // Corridor shortcut: exactly one new node that isn't the goal -> keep walking it
+            // instead of going through the heap.
+            let follow = self.node_buffer.len() == 1
+                && self.arena[self.node_buffer[0] as usize].polygon_to != self.polygon_to;
+
+            if !follow {
+                break;
+            }
+
+            let next_idx = self.node_buffer.pop().unwrap();
+            let next = self.arena[next_idx as usize];
+
+            let exact_reverse = next.root == node.root
+                && next.polygon_to == node.polygon_from
+                && next.polygon_from == node.polygon_to
+                && next.interval.0 == node.interval.1
+                && next.interval.1 == node.interval.0;
+            if exact_reverse {
+                break; // TODO as before: shouldn't happen, find out what triggers it
+            }
+            if self.visited.contains(&next.polygon_to) {
+                break; // loop detected
+            }
+            self.visited.push(next.polygon_to);
+
+            node = next;
+            node_idx = next_idx;
+        }
+
+        self.flush_nodes();
+    }
+
 }
 
-
-
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Node {
-    pub path:                   SmallVec<[Vec2;10]>,
-    pub root:                   Vec2,
-    pub interval:               (Vec2, Vec2),
-    pub edge:                   (u32, u32),
-    pub polygon_from:           u32,
-    pub polygon_to:             u32,
+    /// Index of the parent in the arena, or NO_PARENT.
+    pub parent: u32,
+    /// True if this node's root differs from its parent's, so it adds a path point.
+    pub new_root: bool,
+    pub root: Vec2,
+    pub interval: (Vec2, Vec2),
+    pub edge: (u32, u32),
+    pub polygon_from: u32,
+    pub polygon_to: u32,
     pub distance_start_to_root: f32,
-    pub heuristic:              f32,
+    pub heuristic: f32,
 }
 
-impl Node {
-    fn empty(
-        from: (Vec2, u32)
-    ) -> Self {
-        let empty_node = Node {
-            path: SmallVec::new(),
-            root: from.0,
-            interval: (Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)),
-            edge: (0, 0),
-            polygon_from: from.1,
-            polygon_to: from.1,
-            distance_start_to_root: 0.0,
-            heuristic: 0.0,
-        };
-        return empty_node;
+#[derive(Clone, Copy)]
+struct HeapEntry {
+    f: f32,
+    g: f32,
+    idx: u32,
+}
+
+
+impl PartialEq for HeapEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+impl Eq for HeapEntry {}
+impl PartialOrd for HeapEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for HeapEntry {
+    // Same ordering as before: lowest f first, ties broken toward larger g.
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.f.total_cmp(&other.f) {
+            Ordering::Less => Ordering::Greater,
+            Ordering::Equal => self.g.total_cmp(&other.g),
+            Ordering::Greater => Ordering::Less,
+        }
     }
 }
 
-impl fmt::Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        return write!(f, "Root: {} from: {} to: {} cost: {} dist: {}, path: {:?}", 
-        self.root, self.polygon_from, self.polygon_to, self.heuristic, self.distance_start_to_root, self.path);
-    }
-}
+
+// impl Node {
+//     fn empty(
+//         from: (Vec2, u32)
+//     ) -> Self {
+//         let empty_node = Node {
+//             path: SmallVec::new(),
+//             root: from.0,
+//             interval: (Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)),
+//             edge: (0, 0),
+//             polygon_from: from.1,
+//             polygon_to: from.1,
+//             distance_start_to_root: 0.0,
+//             heuristic: 0.0,
+//         };
+//         return empty_node;
+//     }
+// }
+
+// impl fmt::Debug for Node {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         return write!(f, "Root: {} from: {} to: {} cost: {} dist: {}, path: {:?}", 
+//         self.root, self.polygon_from, self.polygon_to, self.heuristic, self.distance_start_to_root, self.path);
+//     }
+// }
 
 
 
