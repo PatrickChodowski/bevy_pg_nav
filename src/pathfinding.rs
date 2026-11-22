@@ -17,8 +17,16 @@ use crate::pgnavmesh::PGNavmesh;
 
 pub(crate) const DEBUG: bool = false;
 
-const PRECISION: f32 = 1000.0;
-const EPSILON: f32 = 1e-4;
+const PRECISION: f32 = 1000.0;     // Root hashing grid: 1 / PRECISION = 1 mm
+
+/// A point closer than this to a line counts as lying on it. World units.
+const SIDE_TOLERANCE: f32 = 1e-3;
+/// Two points closer than this are the same point. Squared world units (1 mm).
+const POINT_EPS_SQ: f32 = 1e-6;
+/// Successor intervals shorter than this are dropped. Squared world units (1 cm).
+const MIN_INTERVAL_SQ: f32 = 1e-4;
+/// Slack on the intersection time `t`, which is relative to segment length.
+const T_EPS: f32 = 1e-4;
 
 #[derive(Debug, PartialEq, Clone, Reflect, Serialize, Deserialize)]
 pub struct Path {
@@ -293,7 +301,7 @@ impl PathFinder {
                     continue;
                 }
 
-                if successor.interval.0.distance_squared(successor.interval.1) < EPSILON {
+                if successor.interval.0.distance_squared(successor.interval.1) < f32::EPSILON {
                     if DEBUG {
                         info!("  [debug] Successor distance interval too short");
                     }
@@ -415,19 +423,26 @@ impl PathFinder {
 
         let polygon = self.navmesh.polygon(&node.polygon_to);
         let edge: Vec2 = self.navmesh.vertices[&node.edge.1].xz();
-        let right_index: usize = polygon.vertices.iter().enumerate()
-            .find(|(_, v_index)| {self.navmesh.vertex(v_index).xz().distance_squared(edge) < 0.001})
-            .map(|(i, _)| i)
-            .unwrap_or_else(|| {
-                    let mut distances = polygon
-                        .vertices
-                        .iter()
-                        .map(|v_index| {(self.navmesh.vertex(v_index).xz()).distance_squared(edge)})
-                        .enumerate()
-                        .collect::<Vec<_>>();
-                    distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                    distances.first().unwrap().0
-            })+ 1;
+        // let right_index: usize = polygon.vertices.iter().enumerate()
+        //     .find(|(_, v_index)| {self.navmesh.vertex(v_index).xz().distance_squared(edge) < 0.001})
+        //     .map(|(i, _)| i)
+        //     .unwrap_or_else(|| {
+        //             let mut distances = polygon
+        //                 .vertices
+        //                 .iter()
+        //                 .map(|v_index| {(self.navmesh.vertex(v_index).xz()).distance_squared(edge)})
+        //                 .enumerate()
+        //                 .collect::<Vec<_>>();
+        //             distances.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        //             distances.first().unwrap().0
+        //     })+ 1;
+
+        let right_index = polygon
+            .vertices
+            .iter()
+            .position(|v| *v == node.edge.1)
+            .expect("node edge vertex must belong to its polygon") + 1;
+
 
         let left_index = polygon.vertices.len() + right_index - 2;
         let mut typ = SuccessorType::RightNonObservable;
@@ -590,26 +605,34 @@ impl Ord for Node {
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Root(Vec2);
+
+impl Root {
+    #[inline(always)]
+    fn key(&self) -> (i32, i32) {
+        // round(), not truncation: `as i32` alone makes the bucket around 0 double width
+        (
+            (self.0.x * PRECISION).round() as i32,
+            (self.0.y * PRECISION).round() as i32,
+        )
+    }
+}
 
 impl PartialEq for Root {
     #[inline(always)]
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.key() == other.key()
     }
 }
-
 impl Eq for Root {}
 
 impl std::hash::Hash for Root {
     #[inline(always)]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        ((self.0.x * PRECISION) as i32).hash(state);
-        ((self.0.y * PRECISION) as i32).hash(state);
+        self.key().hash(state);
     }
 }
-
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum EdgeSide {
@@ -649,16 +672,12 @@ pub fn heuristic(root: Vec2, goal: Vec2, interval: (Vec2, Vec2)) -> f32 {
 /// at which the given segment will be intersected by the given line.
 #[inline(always)]
 pub(crate) fn intersection_time(line: (Vec2, Vec2), segment: (Vec2, Vec2)) -> f32 {
-    // What's happening here is that we're effectively finding a "partial" area (wedge product) defined by supposed
-    // intersection (line end to segment end x full line), and then divide it by "total" area (full line x full segment).
-    // Apparently this is equal to the so called intersection time, which is the ratio of the supposed segment
-    // "part" defined by intersection to the total segment length. If the "part" is biggger than 1, then the line
-    // does not intersect the segment but intersects the line on which the segment lies.
-    let local_line = line.0 - line.1;
+    let (l0, l1) = (line.0.as_dvec2(), line.1.as_dvec2());
+    let (s0, s1) = (segment.0.as_dvec2(), segment.1.as_dvec2());
 
-    (line.0 - segment.0).perp_dot(local_line) / (local_line).perp_dot(segment.0 - segment.1)
+    let local_line = l0 - l1;
+    ((l0 - s0).perp_dot(local_line) / local_line.perp_dot(s0 - s1)) as f32
 }
-
 
 
 pub trait Vec2Helper {
@@ -671,19 +690,19 @@ impl Vec2Helper for Vec2 {
     /// Returns [EdgeSide].
     #[inline(always)] 
     fn side(self, line: (Vec2, Vec2)) -> EdgeSide {
-        let local_point = self - line.0;
-        let local_line = line.1 - line.0;
+        let p = self.as_dvec2() - line.0.as_dvec2();
+        let l = line.1.as_dvec2() - line.0.as_dvec2();
 
-        match local_line.perp_dot(local_point) {
-            x if x.abs() < EPSILON => EdgeSide::Edge,
+        // cross = |l| * (signed distance of the point from the line)
+        let cross = l.perp_dot(p);
+        let tol = SIDE_TOLERANCE as f64;
 
-            // ORIGINAL:
-            x if x > 0.0 => EdgeSide::Left,
-            _ => EdgeSide::Right,
-            
-            // my hack, no idea why:
-            // x if x > 0.0 => EdgeSide::Right,
-            // _ => EdgeSide::Left,
+        if cross * cross <= tol * tol * l.length_squared() {
+            EdgeSide::Edge // also covers a zero-length line
+        } else if cross > 0.0 {
+            EdgeSide::Left
+        } else {
+            EdgeSide::Right
         }
     }
 
@@ -743,7 +762,7 @@ pub(crate) fn line_intersect_segment(
     segment: (Vec2, Vec2)
 ) -> Option<Vec2> {
     let intersection_time = intersection_time(line, segment);
-    if !(-EPSILON..=(1.0 + EPSILON)).contains(&intersection_time) || intersection_time.is_nan() {
+    if !(-f32::EPSILON..=(1.0 + f32::EPSILON)).contains(&intersection_time) || intersection_time.is_nan() {
         None
     } else {
         Some(segment.0 + intersection_time * (segment.1 - segment.0))
