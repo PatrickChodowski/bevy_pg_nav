@@ -4,7 +4,7 @@ use bevy::mesh::{Indices, Mesh, VertexAttributeValues};
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::platform::collections::HashSet;
 use avian3d::prelude::{Collider, RigidBody};
-use bevy_rerecast::debug::DetailNavmeshGizmo;
+// use bevy_rerecast::debug::DetailNavmeshGizmo;
 use bevy_rerecast::generator::NavmeshGenerator;
 use bevy_rerecast::NavmeshSettings;
 
@@ -114,7 +114,7 @@ fn generate_terrain_navmesh_on_colliders_ready(
     }
 
     let navmesh = generator.generate(settings);
-    commands.spawn(DetailNavmeshGizmo::new(&navmesh));
+    // commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Terrain, navmesh);
 }
 

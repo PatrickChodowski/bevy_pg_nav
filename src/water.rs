@@ -9,7 +9,7 @@ use avian3d::prelude::{Collider, RigidBody};
 use bevy_rerecast::generator::NavmeshGenerator;
 
 use bevy_rerecast::NavmeshSettings;
-use bevy_rerecast::debug::DetailNavmeshGizmo;
+// use bevy_rerecast::debug::DetailNavmeshGizmo;
 
 use bevy_pg_core::prelude::{AABB, TerrainChunk, WaterChunk};
 use crate::plugin::NavmeshGenerationData;
@@ -168,7 +168,7 @@ fn on_water_navmesh_sources_ready(
     settings.filter = Some(hs);
 
     let navmesh = generator.generate(settings);
-    commands.spawn(DetailNavmeshGizmo::new(&navmesh));
+    // commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Water, navmesh);
 }
 

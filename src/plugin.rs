@@ -7,7 +7,7 @@ use bevy_common_assets::json::JsonAssetPlugin;
 use bevy::prelude::*;
 use bevy::platform::collections::HashMap;
 use bevy_rerecast::prelude::*;
-use bevy_rerecast::debug::DetailNavmeshGizmo;
+// use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::multi_nav::PGMultiNavPlugin;
@@ -52,7 +52,7 @@ impl Plugin for PGNavPlugin {
         .add_observer(on_ready_navmesh)
         .add_observer(on_spawn_navmesh)
         .add_systems(Update, check_navgendata.run_if(resource_exists_and_changed::<NavmeshGenerationData>))
-        .add_systems(Update, toggle_visibility) //.run_if(resource_changed::<NavResources>))
+        // .add_systems(Update, toggle_visibility) //.run_if(resource_changed::<NavResources>))
         ;
     }
 }
@@ -275,18 +275,18 @@ fn on_spawn_navmesh(
 }
 
 
-fn toggle_visibility(
-    navres:       Res<NavResources>,
-    mut query:    Query<(Entity, &mut Visibility), With<DetailNavmeshGizmo>>
-){
+// fn toggle_visibility(
+//     navres:       Res<NavResources>,
+//     mut query:    Query<(Entity, &mut Visibility), With<DetailNavmeshGizmo>>
+// ){
 
-    if navres.visible {
-        for (_entity, mut vis) in query.iter_mut(){
-            *vis = Visibility::Inherited;
-        }
-    } else {
-        for (_entity, mut vis) in query.iter_mut(){
-            *vis = Visibility::Hidden;
-        }
-    }
-}
+//     if navres.visible {
+//         for (_entity, mut vis) in query.iter_mut(){
+//             *vis = Visibility::Inherited;
+//         }
+//     } else {
+//         for (_entity, mut vis) in query.iter_mut(){
+//             *vis = Visibility::Hidden;
+//         }
+//     }
+// }
