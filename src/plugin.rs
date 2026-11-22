@@ -1,6 +1,6 @@
 
 use bevy::tasks::IoTaskPool;
-use avian3d::prelude::{Collider, RigidBody};
+use avian3d::prelude::{Collider, RigidBody, PhysicsSchedulePlugin, PhysicsPlugins};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use bevy_common_assets::json::JsonAssetPlugin;
@@ -10,7 +10,6 @@ use bevy_rerecast::prelude::*;
 use bevy_rerecast::debug::DetailNavmeshGizmo;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::TerrainChunk;
-use avian3d::PhysicsPlugins;
 use crate::multi_nav::PGMultiNavPlugin;
 use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
@@ -18,7 +17,7 @@ use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
 
 pub struct PGNavPlugin{
-    // pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+    pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
 }
 
 #[derive(Resource)]
@@ -30,9 +29,13 @@ pub struct NavResources {
 impl Plugin for PGNavPlugin {
     fn build(&self, app: &mut App) {
         app
-        .init_asset::<PGNavmesh>()
-        .add_plugins((
-            PhysicsPlugins::default(),
+        .init_asset::<PGNavmesh>();
+
+        if !app.is_plugin_added::<PhysicsSchedulePlugin>() {
+            app.add_plugins(PhysicsPlugins::default());
+        }
+
+        app.add_plugins((
             NavmeshPlugins::default(),
             AvianBackendPlugin::default(),
             JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]),
@@ -40,10 +43,10 @@ impl Plugin for PGNavPlugin {
             PGWaterNavPlugin,
             PGMultiNavPlugin
         ))
-        // .insert_resource(NavResources{
-        //     colliders_mapping: self.colliders_mapping,
-        //     visible: false
-        // })
+        .insert_resource(NavResources{
+            colliders_mapping: self.colliders_mapping,
+            visible: false
+        })
         .insert_resource(NavHandlesHolders::new())
         .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
@@ -57,23 +60,10 @@ impl Plugin for PGNavPlugin {
 // Entry point for external systems
 fn on_generate_navmesh(
     trigger:      On<GenerateNavMesh>,
-    terrains:     Query<Option<&Name>, (With<TerrainChunk>, With<Transform>, With<Mesh3d>)>,
     mut commands: Commands
 ){
-    info!("Triggered Generate Navmesh");
-    let Ok(maybe_name) = terrains.get(trigger.plane_entity) else {return};
-
-    if maybe_name.is_none(){
-        warn!("Plane needs a name before generating navmesh");
-        return;
-    }
-    let plane_name = maybe_name.unwrap().to_string();
-
-    info!("Generate Navmesh for plane entity: {} name: {}", trigger.plane_entity, plane_name);
-    let mut ngd = NavmeshGenerationData::new(trigger.plane_entity, plane_name);
-    ngd.terrain_settings = trigger.terrain_settings.clone();
-    ngd.water_settings = trigger.water_settings.clone();
-
+    info!("Generate Navmesh for plane entity: {}", trigger.plane_entity);
+    let ngd = NavmeshGenerationData::from_event(&trigger.event());
     commands.insert_resource(ngd);
     commands.trigger(GenerateTerrainNavmesh);
     commands.trigger(GenerateWaterNavmesh);
@@ -144,6 +134,7 @@ pub struct NavmeshTerrain;
 #[derive(Event)]
 pub struct GenerateNavMesh {
     pub plane_entity: Entity,
+    pub name: String,
     pub terrain_settings: Option<NavmeshSettings>,
     pub water_settings: Option<NavmeshSettings>
 }
@@ -158,11 +149,35 @@ pub (crate) struct NavmeshGenerationData {
     pub(crate) water_settings: Option<NavmeshSettings>,
 }
 impl NavmeshGenerationData {
-    pub(crate) fn new(
-        plane_entity: Entity, 
-        name: String
-    ) -> Self {
-        info!("New Navmesh Generation Data");
+    // pub(crate) fn new(
+    //     plane_entity: Entity, 
+    //     name: String
+    // ) -> Self {
+    //     info!("New Navmesh Generation Data");
+    //     let ngd = NavmeshGenerationData {
+    //         recast_handles: HashMap::from(
+    //             [
+    //                 (PGNavmeshType::Terrain, (None, false)),
+    //                 (PGNavmeshType::Water, (None, false))
+    //             ]
+    //         ),
+    //         name: name,
+    //         plane_entity,
+    //         terrain_settings: None,
+    //         water_settings: None
+    //     };
+    //     return ngd;
+    // }
+    pub(crate) fn add_handle(
+        &mut self, 
+        typ: PGNavmeshType, 
+        handle: Handle<Navmesh>
+    ){
+        self.recast_handles.insert(typ, (Some(handle), false));
+    }
+
+
+    pub(crate) fn from_event(event: &GenerateNavMesh) -> Self {
         let ngd = NavmeshGenerationData {
             recast_handles: HashMap::from(
                 [
@@ -170,19 +185,13 @@ impl NavmeshGenerationData {
                     (PGNavmeshType::Water, (None, false))
                 ]
             ),
-            name: name.clone(),
-            plane_entity,
-            terrain_settings: None,
-            water_settings: None
+            name: event.name.clone(),
+            plane_entity: event.plane_entity,
+            terrain_settings: event.terrain_settings.clone(),
+            water_settings: event.water_settings.clone()
         };
+
         return ngd;
-    }
-    pub(crate) fn add_handle(
-        &mut self, 
-        typ: PGNavmeshType, 
-        handle: Handle<Navmesh>
-    ){
-        self.recast_handles.insert(typ, (Some(handle), false));
     }
 }
 

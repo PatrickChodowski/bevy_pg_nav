@@ -586,10 +586,10 @@ impl PGNavmesh {
     pub fn filename(&self) -> String {
         let filename = match self.typ {
             PGNavmeshType::Terrain => {
-                format!("./assets/scenes/navs/{}_terrain.nav.json", self.name)
+                format!("./assets/game_map/{0}/navmesh/{0}_terrain.nav.json", self.name)
             }
             PGNavmeshType::Water => {
-                format!("./assets/scenes/navs/{}_water.nav.json", self.name)
+                format!("./assets/game_map/{0}/navmesh/{0}_water.nav.json", self.name)
             }
         };
         return filename;
