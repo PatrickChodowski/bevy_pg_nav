@@ -242,14 +242,14 @@ fn on_ready_navmesh(
         
         commands.spawn(pgn.clone());
 
-        info!("Serializing navmesh to {}", pgn.filename());
-        IoTaskPool::get().spawn(async move {
-            let f = File::create(&pgn.filename()).ok().unwrap();
-            let mut writer = BufWriter::new(f);
-            let _res = serde_json::to_writer(&mut writer, &pgn);
-            let _res = writer.flush();
-        })
-        .detach();
+        // info!("Serializing navmesh to {}", pgn.filename());
+        // IoTaskPool::get().spawn(async move {
+        //     let f = File::create(&pgn.filename()).ok().unwrap();
+        //     let mut writer = BufWriter::new(f);
+        //     let _res = serde_json::to_writer(&mut writer, &pgn);
+        //     let _res = writer.flush();
+        // })
+        // .detach();
         
         nav_state.1 = true;
     }

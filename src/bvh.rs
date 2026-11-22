@@ -10,6 +10,35 @@ impl BVH {
     pub(crate) fn empty() -> Self {
         BVH {data: Vec::new()}
     } 
+    /// Drops a polygon from every leaf. Boxes keep their size, so the tree stays valid.
+    pub(crate) fn remove_polygon(&mut self, id: u32) {
+        for node in &mut self.data {
+            if let BHVType::Leaf(polygons) = &mut node.typ {
+                polygons.retain(|p| *p != id);
+            }
+        }
+    }
+
+    pub(crate) fn reinsert_polygon(&mut self, id: u32, outline: &[Vec2]) {
+        if outline.len() < 3 {
+            return;
+        }
+        for node in &mut self.data {
+            if let BHVType::Leaf(polygons) = &mut node.typ {
+                let touches = (1..outline.len() - 1).any(|i| {
+                    aabb_intersects_triangle(&node.aabb, outline[0], outline[i], outline[i + 1])
+                });
+                let present = polygons.contains(&id);
+                match (touches, present) {
+                    (true, false) => polygons.push(id),
+                    (false, true) => polygons.retain(|p| *p != id),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -25,22 +54,24 @@ pub struct BVHNode {
     pub typ:  BHVType
 }
 
+const BVH_PAD: f32 = 1e-3;
+
 pub(crate) fn aabb_intersects_triangle(aabb: &AABB, p0: Vec2, p1: Vec2, p2: Vec2) -> bool {
-    // First check: are any triangle vertices inside the AABB?
-    if aabb.has_point(p0) || aabb.has_point(p1)  || aabb.has_point(p2)  {
+    let (min_x, max_x) = (aabb.min_x - BVH_PAD, aabb.max_x + BVH_PAD);
+    let (min_z, max_z) = (aabb.min_z - BVH_PAD, aabb.max_z + BVH_PAD);
+
+    let inside = |p: Vec2| p.x >= min_x && p.x <= max_x && p.y >= min_z && p.y <= max_z;
+    if inside(p0) || inside(p1) || inside(p2) {
         return true;
     }
-    
-    // Second check: does any triangle edge intersect the AABB edges?
+
     let aabb_edges = [
-        (Vec2::new(aabb.min_x, aabb.min_z), Vec2::new(aabb.max_x, aabb.min_z)),
-        (Vec2::new(aabb.max_x, aabb.min_z), Vec2::new(aabb.max_x, aabb.max_z)),
-        (Vec2::new(aabb.max_x, aabb.max_z), Vec2::new(aabb.min_x, aabb.max_z)),
-        (Vec2::new(aabb.min_x, aabb.max_z), Vec2::new(aabb.min_x, aabb.min_z)),
+        (Vec2::new(min_x, min_z), Vec2::new(max_x, min_z)),
+        (Vec2::new(max_x, min_z), Vec2::new(max_x, max_z)),
+        (Vec2::new(max_x, max_z), Vec2::new(min_x, max_z)),
+        (Vec2::new(min_x, max_z), Vec2::new(min_x, min_z)),
     ];
-    
     let triangle_edges = [(p0, p1), (p1, p2), (p2, p0)];
-    
     for &(a1, a2) in &aabb_edges {
         for &(t1, t2) in &triangle_edges {
             if segments_intersect(a1, a2, t1, t2) {
@@ -48,18 +79,11 @@ pub(crate) fn aabb_intersects_triangle(aabb: &AABB, p0: Vec2, p1: Vec2, p2: Vec2
             }
         }
     }
-    
-    // Third check: is the AABB center inside the triangle?
-    let center = Vec2::new(
-        (aabb.min_x + aabb.max_x) / 2.0,
-        (aabb.min_z + aabb.max_z) / 2.0,
-    );
-    if point_in_triangle(center, p0, p1, p2) {
-        return true;
-    }
-    
-    false
+
+    let center = Vec2::new((min_x + max_x) / 2.0, (min_z + max_z) / 2.0);
+    point_in_triangle(center, p0, p1, p2)
 }
+
 
 fn segments_intersect(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2) -> bool {
     let d1 = sign((b2 - b1).perp_dot(a1 - b1));
