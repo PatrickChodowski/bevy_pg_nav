@@ -11,7 +11,7 @@ use bevy_rerecast::prelude::*;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::multi_nav::PGMultiNavPlugin;
-use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, GenerateWaterNavmesh};
+use crate::water::{PGWaterNavPlugin, WaterNavmeshSource};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
@@ -65,8 +65,8 @@ fn on_generate_navmesh(
     info!("Generate Navmesh for plane entity: {}", trigger.plane_entity);
     let ngd = NavmeshGenerationData::from_event(&trigger.event());
     commands.insert_resource(ngd);
+    // Water follows once the terrain/static colliders are ready (water::spawn_water_sources).
     commands.trigger(GenerateTerrainNavmesh);
-    commands.trigger(GenerateWaterNavmesh);
 }
 
 fn check_navgendata(
@@ -136,7 +136,10 @@ pub struct GenerateNavMesh {
     pub plane_entity: Entity,
     pub name: String,
     pub terrain_settings: Option<NavmeshSettings>,
-    pub water_settings: Option<NavmeshSettings>
+    /// None = no water navmesh.
+    pub water_settings: Option<NavmeshSettings>,
+    /// Minimum water depth for boats (world units): shallower water counts as land.
+    pub water_min_depth: f32,
 }
 
 // Resource existing only during navmesh creation. Removed after finish
@@ -147,6 +150,9 @@ pub (crate) struct NavmeshGenerationData {
     pub(crate) plane_entity: Entity,
     pub(crate) terrain_settings: Option<NavmeshSettings>,
     pub(crate) water_settings: Option<NavmeshSettings>,
+    pub(crate) water_min_depth: f32,
+    /// Heights of the water surfaces used for the water navmesh (see water::spawn_water_sources).
+    pub(crate) water_heights: Vec<f32>,
 }
 impl NavmeshGenerationData {
     // pub(crate) fn new(
@@ -176,19 +182,25 @@ impl NavmeshGenerationData {
         self.recast_handles.insert(typ, (Some(handle), false));
     }
 
+    /// This navmesh type won't be generated (e.g. no navigable water): stop waiting for it.
+    pub(crate) fn skip(&mut self, typ: PGNavmeshType) {
+        self.recast_handles.remove(&typ);
+    }
+
 
     pub(crate) fn from_event(event: &GenerateNavMesh) -> Self {
+        let mut recast_handles = HashMap::from([(PGNavmeshType::Terrain, (None, false))]);
+        if event.water_settings.is_some() {
+            recast_handles.insert(PGNavmeshType::Water, (None, false));
+        }
         let ngd = NavmeshGenerationData {
-            recast_handles: HashMap::from(
-                [
-                    (PGNavmeshType::Terrain, (None, false)),
-                    (PGNavmeshType::Water, (None, false))
-                ]
-            ),
+            recast_handles,
             name: event.name.clone(),
             plane_entity: event.plane_entity,
             terrain_settings: event.terrain_settings.clone(),
-            water_settings: event.water_settings.clone()
+            water_settings: event.water_settings.clone(),
+            water_min_depth: event.water_min_depth.max(0.0),
+            water_heights: Vec::new(),
         };
 
         return ngd;
@@ -223,6 +235,7 @@ fn on_ready_navmesh(
 
     let Some(recast_navmesh) = ass_nav.get(trigger.0) else {return;};
     let navname = navgendata.name.clone();
+    let water_heights = navgendata.water_heights.clone();
 
     for (navmesh_type, ref mut nav_state) in navgendata.recast_handles.iter_mut(){
         if nav_state.1 {continue};
@@ -234,6 +247,12 @@ fn on_ready_navmesh(
             navmesh_type
         );
         pgn.name = navname.clone();
+
+        // Recast quantises heights to its voxel cell height (derived from agent_height), which
+        // can put the surface a fraction of a unit above the water. Water is flat: snap exactly.
+        if *navmesh_type == PGNavmeshType::Water && !water_heights.is_empty() {
+            snap_to_heights(&mut pgn, &water_heights);
+        }
 
         // pgn.cleanup_lower();
         pgn.reorder_vertex_polygons();
@@ -252,6 +271,15 @@ fn on_ready_navmesh(
         // .detach();
         
         nav_state.1 = true;
+    }
+}
+
+/// Moves every vertex to the closest of `heights`.
+fn snap_to_heights(pgn: &mut PGNavmesh, heights: &[f32]) {
+    for vertex in pgn.vertices.values_mut() {
+        if let Some(h) = heights.iter().min_by(|a, b| (*a - vertex.loc.y).abs().total_cmp(&(*b - vertex.loc.y).abs())) {
+            vertex.loc.y = *h;
+        }
     }
 }
 

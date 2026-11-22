@@ -10,7 +10,7 @@ use bevy_rerecast::NavmeshSettings;
 
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::pgnavmesh::PGNavmeshType;
-use crate::plugin::{NavResources, NavmeshGenerationData};
+use crate::plugin::{NavResources, NavStatic, NavmeshGenerationData};
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 
@@ -74,8 +74,9 @@ impl WaitColliders {
     }
 }
 
+/// The terrain and nav-static colliders are registered: navmesh generation can start.
 #[derive(Event)]
-struct CollidersReady;
+pub(crate) struct CollidersReady;
 
 fn wait_for_colliders(
     time: Res<Time>,
@@ -97,7 +98,7 @@ fn generate_terrain_navmesh_on_colliders_ready(
     mut generator:  NavmeshGenerator,
     mut commands:   Commands,
     mut navgendata: ResMut<NavmeshGenerationData>,
-    // navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
+    navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
 ){
 
     info!("[NAV] [on_colliders_ready] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
@@ -112,6 +113,11 @@ fn generate_terrain_navmesh_on_colliders_ready(
     if let Some(ref terrain_settings) = navgendata.terrain_settings {
         settings = terrain_settings.clone();
     }
+    // Only the terrain and the nav statics. Without a filter Recast would take every collider,
+    // including the water surfaces built for the boat navmesh (people would walk on water).
+    let mut sources: HashSet<Entity> = navstatics.iter().collect();
+    sources.insert(navgendata.plane_entity);
+    settings.filter = Some(sources);
 
     let navmesh = generator.generate(settings);
     // commands.spawn(DetailNavmeshGizmo::new(&navmesh));

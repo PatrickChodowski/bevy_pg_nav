@@ -1,606 +1,338 @@
+//! Water navmesh (boats).
+//!
+//! The navigable water surface is decided in 2D first, then handed to Recast on its own:
+//!
+//! 1. For every water plane (entities with `WaterChunk`), its real extent (mesh bounds x world
+//!    transform) is rasterised into a grid of `WATER_CELL` cells. A cell is water when the
+//!    terrain under it is at least `water_min_depth` below the surface (or there is no terrain,
+//!    e.g. open sea past the plane's edge) and no nav static (dock, pier, building...) covers it.
+//! 2. Water cells become a flat mesh at the water height (row runs merged into strips). Islands
+//!    and shorelines are just holes and edges in that mesh: no boundary tracing or polygon
+//!    triangulation needed, so any shape works, including lakes with islands.
+//! 3. Recast generates the navmesh from only those meshes, eroding the shores by the boat radius
+//!    (`water_settings.agent_radius`) and building clean polygons.
+//!
+//! Terrain heights are sampled from the plane's vertex grid (bilinear, constant time per cell)
+//! instead of raycasting every triangle per cell.
+
+use avian3d::prelude::{Collider, RigidBody, Rotation, SimpleCollider};
+use bevy::mesh::{Mesh, VertexAttributeValues};
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use bevy::mesh::Mesh;
-use bevy::platform::collections::{HashSet, HashMap};
-use bevy::mesh::{VertexAttributeValues, Indices};
-use bevy::color::palettes::css::WHITE;
-use dashmap::DashMap;
-use rayon::prelude::*;
-use avian3d::prelude::{Collider, RigidBody};
 use bevy_rerecast::generator::NavmeshGenerator;
 
-use bevy_rerecast::NavmeshSettings;
-// use bevy_rerecast::debug::DetailNavmeshGizmo;
-
-use bevy_pg_core::prelude::{AABB, TerrainChunk, WaterChunk};
-use crate::plugin::NavmeshGenerationData;
+use bevy_pg_core::prelude::WaterChunk;
 use crate::pgnavmesh::PGNavmeshType;
-use crate::terrain::TerrainRayMeshData;
-use crate::tools::NavRay;
+use crate::plugin::{NavStatic, NavmeshGenerationData};
+use crate::terrain::CollidersReady;
+
+/// Size of the water mask cells (world units). Recast smooths the staircase edges afterwards.
+const WATER_CELL: f32 = 0.5;
+/// Colliders need a moment to be registered by physics before Recast can see them.
+const WATER_SOURCES_WAIT_SECS: f32 = 0.5;
 
 pub struct PGWaterNavPlugin;
 
 impl Plugin for PGWaterNavPlugin {
     fn build(&self, app: &mut App) {
         app
-        .add_observer(generate_water_navmesh)
-        .add_observer(on_water_navmesh_sources_ready)
+        .add_observer(spawn_water_sources)
+        .add_systems(Update, generate_when_sources_ready.run_if(resource_exists::<WaitWaterSources>))
         ;
     }
 }
 
-#[derive(Event)]
-pub(crate) struct GenerateWaterNavmesh;
+#[derive(Component)]
+pub(crate) struct WaterNavmeshSource;
 
-fn generate_water_navmesh(
-    _trigger:         On<GenerateWaterNavmesh>,
-    terrains:         Query<(&Transform, &Mesh3d, &TerrainChunk)>,
-    water_query:      Query<(&Transform, &WaterChunk)>,
-    mut commands:     Commands,
-    mut meshes:       ResMut<Assets<Mesh>>,
-    mut materials:    ResMut<Assets<StandardMaterial>>,
-    navgendata:       Res<NavmeshGenerationData>,
-){
+#[derive(Resource)]
+struct WaitWaterSources(Timer);
 
-    let Ok((terrain_transform, mesh3d, chunk)) = terrains.get(navgendata.plane_entity) else {return};
-    let Some(mesh) = meshes.get(&mesh3d.0) else {return};
-
-    info!("Generate Water Navmesh for entity {}", navgendata.plane_entity);
-    let raycast_step = 1;
-    let loc = terrain_transform.translation;
-    info!("terrain chunk dims: {} terrain loc: {}", chunk.dims, loc);
-    let chunk_half_dims: Vec2 = chunk.dims*0.5;
-    let trmd = TerrainRayMeshData::from_mesh(mesh, &terrain_transform.to_matrix());
-
-    let min_x = (loc.x - chunk_half_dims.x) as i32;
-    let max_x = (loc.x + chunk_half_dims.x) as i32;
-    let min_z = (loc.z - chunk_half_dims.y) as i32;
-    let max_z = (loc.z + chunk_half_dims.y) as i32;
-
-    let xs_u: Vec<i32> = (min_x..=max_x).step_by(raycast_step).collect();
-    let zs_u: Vec<i32> = (min_z..=max_z).step_by(raycast_step).collect();
-
-    let xs = xs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-    let zs = zs_u.iter().map(|n| *n as f32).collect::<Vec<f32>>();
-
-    let mut water_aabbs: Vec<(AABB, f32)> = Vec::new();
-    for (water_transform, water_chunk) in water_query.iter(){
-        let water_aabb: AABB = AABB::from_loc_dims(water_transform.translation.xz(), water_chunk.dims);
-        water_aabbs.push((water_aabb, water_transform.translation.y));
-    }
-
-
-    let mut water_hits = raycasts_rain(&xs, &zs, &trmd, &water_aabbs);
-    // Group waters already picks only boundary points
-    let groups_map = group_waters(&mut water_hits, xs_u.len() as i32 - 1, zs_u.len() as i32 - 1);
-
-    // Order groups
-    let mut hm_groups: HashMap<usize, Vec<WaterVertex>> = HashMap::new();
-    for (_tile, vertex) in groups_map.iter(){
-        hm_groups.entry(vertex.group).or_insert(Vec::new()).push(*vertex);
-    }
-
-    // info!("{:?}", hm_groups);
-
-    let mut triangle_map: HashMap<usize, Vec<[Vec3A; 3]>> = HashMap::new();
-    for (group, vertices) in hm_groups.iter_mut(){
-        // info!("group {} vertices count: {:?}", group, vertices.len());
-        let mut vlocs: Vec<Vec3A> = order_boundary(vertices, xs_u.len() as i32 - 1, zs_u.len() as i32 - 1);
-
-        // info!(" Group: {} Vertices count after order_boundary: {}", group, vlocs.len());
-        vlocs = remove_collinear(&mut vlocs);
-        // info!(" Group: {} Vertices count after remove_collinear: {}", group, vlocs.len());
-
-
-        // for v in vlocs.iter(){
-        //     commands.spawn(
-        //         (
-        //             Mesh3d(meshes.add(Sphere::new(0.5))),
-        //             NotShadowReceiver,
-        //             MeshMaterial3d(materials.add(StandardMaterial {
-        //                 base_color: Color::WHITE,
-        //                 ..default()
-        //             })),
-        //             Transform::from_translation(Vec3::new(v.x, v.y, v.z)).with_scale(Vec3::splat(3.0)),
-        //         )
-        //     );
-        // }
-
-        let triangles = triangulate(&mut vlocs);
-        // info!("triangles: {:?}", triangles);
-
-        let mesh = mesh_from_triangles(&triangles);
-        triangle_map.insert(*group, triangles);
-        // info!("mesh: {:?}", mesh);
-
-        let trimesh_data = extract_trimesh(&mesh);
-        // info!("{:?}", trimesh_data);
-        let collider = Collider::trimesh(trimesh_data.0, trimesh_data.1);
-
-        // info!("collider: {:?}", collider);
-
-        commands.spawn(
-            (
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(materials.add(StandardMaterial::from(Color::from(WHITE)))),
-                WaterNavmeshSource,
-                Visibility::Hidden,
-                collider,
-                RigidBody::Static
-            )
-        );
-    }
-
-    commands.trigger(WaterNavmeshesReady);
-    
+/// A water plane's area and height, in world space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WaterArea {
+    pub(crate) min: Vec2,
+    pub(crate) max: Vec2,
+    pub(crate) height: f32,
 }
 
+/// Terrain heights on the plane's regular vertex grid, in world space.
+pub(crate) struct HeightGrid {
+    xs: Vec<f32>,
+    zs: Vec<f32>,
+    heights: Vec<f32>, // [zi * xs.len() + xi]
+}
 
-
-fn on_water_navmesh_sources_ready(
-    _trigger:            On<WaterNavmeshesReady>,
-    mut generator:       NavmeshGenerator,
-    mut commands:        Commands,
-    water_sources:       Query<Entity, With<WaterNavmeshSource>>,
-    mut navgendata:      ResMut<NavmeshGenerationData>
-){
-    let mut hs = HashSet::new();
-    for water_mesh_entity in water_sources.iter(){
-        hs.insert(water_mesh_entity);
+impl HeightGrid {
+    /// From a plane mesh (a regular grid of vertices, as Plane3d and the editor make) and its
+    /// world transform. Returns None for meshes that aren't such a grid.
+    pub(crate) fn from_mesh(mesh: &Mesh, transform: &GlobalTransform) -> Option<Self> {
+        let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
+        let world: Vec<Vec3> = positions.iter().map(|p| transform.transform_point(Vec3::from(*p))).collect();
+        let mut xs: Vec<f32> = world.iter().map(|p| p.x).collect();
+        let mut zs: Vec<f32> = world.iter().map(|p| p.z).collect();
+        xs.sort_by(f32::total_cmp);
+        zs.sort_by(f32::total_cmp);
+        xs.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+        zs.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+        if xs.len() < 2 || zs.len() < 2 || xs.len() * zs.len() != world.len() {
+            return None;
+        }
+        let mut heights = vec![0.0; xs.len() * zs.len()];
+        for p in &world {
+            let xi = xs.partition_point(|&v| v < p.x - 1e-3);
+            let zi = zs.partition_point(|&v| v < p.z - 1e-3);
+            heights[zi * xs.len() + xi] = p.y;
+        }
+        Some(Self { xs, zs, heights })
     }
 
-    // let settings = NavmeshSettings {
-    //     filter: Some(hs),
-    //     walkable_climb: 10.0,
-    //     walkable_slope_angle: 0.1_f32.to_radians(),
-    //     agent_radius: 1.0,
-    //     agent_height: 2.0,
-    //     max_vertices_per_polygon: 20,
-    //     max_simplification_error: 1.3,
-    //     min_region_size: 1,
-    //     up: Vec3::Y,
-    //     ..default()
-    // };
-
-    let mut settings = NavmeshSettings::default();
-    if let Some(ref water_settings) = navgendata.water_settings {
-        settings = water_settings.clone();
+    /// Terrain height at (x, z), bilinear between grid vertices. None outside the terrain.
+    pub(crate) fn height_at(&self, p: Vec2) -> Option<f32> {
+        let (x0, x1) = (*self.xs.first()?, *self.xs.last()?);
+        let (z0, z1) = (*self.zs.first()?, *self.zs.last()?);
+        if p.x < x0 || p.x > x1 || p.y < z0 || p.y > z1 {
+            return None;
+        }
+        let cell = |coords: &[f32], v: f32| {
+            let i = coords.partition_point(|&c| c <= v).clamp(1, coords.len() - 1) - 1;
+            let t = (v - coords[i]) / (coords[i + 1] - coords[i]).max(1e-6);
+            (i, t.clamp(0.0, 1.0))
+        };
+        let (xi, tx) = cell(&self.xs, p.x);
+        let (zi, tz) = cell(&self.zs, p.y);
+        let w = self.xs.len();
+        let h = |xi: usize, zi: usize| self.heights[zi * w + xi];
+        let top = h(xi, zi) + (h(xi + 1, zi) - h(xi, zi)) * tx;
+        let bottom = h(xi, zi + 1) + (h(xi + 1, zi + 1) - h(xi, zi + 1)) * tx;
+        Some(top + (bottom - top) * tz)
     }
-    settings.filter = Some(hs);
+}
 
+/// Which cells of `area` (cell size `cell`) boats can use. Returns (columns, rows, mask) with
+/// mask[row * columns + column]; cell centres are `area.min + (c + 0.5, r + 0.5) * cell`.
+pub(crate) fn water_mask(
+    area: &WaterArea,
+    cell: f32,
+    min_depth: f32,
+    terrain_height: impl Fn(Vec2) -> Option<f32>,
+    blocked: impl Fn(Vec2) -> bool,
+) -> (usize, usize, Vec<bool>) {
+    let size = area.max - area.min;
+    let cols = (size.x / cell).ceil().max(0.0) as usize;
+    let rows = (size.y / cell).ceil().max(0.0) as usize;
+    let mut mask = vec![false; cols * rows];
+    for r in 0..rows {
+        for c in 0..cols {
+            let p = area.min + Vec2::new(c as f32 + 0.5, r as f32 + 0.5) * cell;
+            let p = p.min(area.max); // last, partial cells: sample inside the plane
+            let deep_enough = terrain_height(p).is_none_or(|ground| ground <= area.height - min_depth);
+            mask[r * cols + c] = deep_enough && !blocked(p);
+        }
+    }
+    (cols, rows, mask)
+}
+
+/// Flat triangles at the water height covering the mask's water cells. Each row's runs of water
+/// cells become one quad, so a simple lake is a few hundred triangles, not one pair per cell.
+pub(crate) fn mask_to_mesh(area: &WaterArea, cell: f32, cols: usize, rows: usize, mask: &[bool]) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for r in 0..rows {
+        let mut c = 0;
+        while c < cols {
+            if !mask[r * cols + c] {
+                c += 1;
+                continue;
+            }
+            let start = c;
+            while c < cols && mask[r * cols + c] {
+                c += 1;
+            }
+            let x0 = area.min.x + start as f32 * cell;
+            let x1 = (area.min.x + c as f32 * cell).min(area.max.x);
+            let z0 = area.min.y + r as f32 * cell;
+            let z1 = (area.min.y + (r + 1) as f32 * cell).min(area.max.y);
+            let base = vertices.len() as u32;
+            vertices.extend([
+                Vec3::new(x0, area.height, z0),
+                Vec3::new(x1, area.height, z0),
+                Vec3::new(x1, area.height, z1),
+                Vec3::new(x0, area.height, z1),
+            ]);
+            // Counter-clockwise seen from above (+Y), so the surface faces up.
+            indices.push([base, base + 2, base + 1]);
+            indices.push([base, base + 3, base + 2]);
+        }
+    }
+    (vertices, indices)
+}
+
+/// World-space area of a water plane from its mesh and transform.
+fn water_area(mesh: &Mesh, transform: &GlobalTransform) -> Option<WaterArea> {
+    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
+    let world = positions.iter().map(|p| transform.transform_point(Vec3::from(*p)));
+    let (min, max) = world.fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    (max.x > min.x && max.z > min.z).then(|| WaterArea { min: min.xz(), max: max.xz(), height: (min.y + max.y) * 0.5 })
+}
+
+/// Builds the boat-usable water surfaces once the terrain and nav-static colliders exist.
+fn spawn_water_sources(
+    _trigger:     On<CollidersReady>,
+    mut commands: Commands,
+    meshes:       Res<Assets<Mesh>>,
+    mut navgendata: ResMut<NavmeshGenerationData>,
+    terrains:     Query<(&Mesh3d, &GlobalTransform)>,
+    waters:       Query<(&Mesh3d, &GlobalTransform), With<WaterChunk>>,
+    statics:      Query<(&Collider, &GlobalTransform), With<NavStatic>>,
+) {
+    if navgendata.water_settings.is_none() {
+        return;
+    }
+
+    let terrain = terrains
+        .get(navgendata.plane_entity)
+        .ok()
+        .and_then(|(mesh3d, transform)| HeightGrid::from_mesh(meshes.get(&mesh3d.0)?, transform));
+    if terrain.is_none() {
+        warn!("[NAV] [water] Terrain plane isn't a regular vertex grid; treating all water as deep");
+    }
+
+    // Docks, piers, buildings... block boats where they stand (their collider's footprint).
+    let obstacles: Vec<(Vec2, Vec2)> = statics
+        .iter()
+        .map(|(collider, transform)| {
+            let (_, rotation, translation) = transform.to_scale_rotation_translation();
+            let aabb = collider.aabb(translation, Rotation(rotation), 0.0);
+            (aabb.min.xz(), aabb.max.xz())
+        })
+        .collect();
+    let blocked = |p: Vec2| obstacles.iter().any(|(lo, hi)| p.cmpge(*lo).all() && p.cmple(*hi).all());
+
+    let mut sources = 0;
+    for (mesh3d, transform) in &waters {
+        let Some(area) = meshes.get(&mesh3d.0).and_then(|m| water_area(m, transform)) else { continue };
+        let (cols, rows, mask) = water_mask(
+            &area,
+            WATER_CELL,
+            navgendata.water_min_depth,
+            |p| terrain.as_ref().and_then(|t| t.height_at(p)),
+            blocked,
+        );
+        let (vertices, indices) = mask_to_mesh(&area, WATER_CELL, cols, rows, &mask);
+        if indices.is_empty() {
+            info!("[NAV] [water] Water plane at {:?} has no water deep enough for boats", area.min);
+            continue;
+        }
+        navgendata.water_heights.push(area.height);
+        commands.spawn((
+            Name::new("Water navmesh source"),
+            WaterNavmeshSource,
+            Collider::trimesh(vertices, indices),
+            RigidBody::Static,
+            Transform::IDENTITY,
+        ));
+        sources += 1;
+    }
+    info!("[NAV] [water] {sources} water surface(s) prepared");
+    commands.insert_resource(WaitWaterSources(Timer::from_seconds(WATER_SOURCES_WAIT_SECS, TimerMode::Once)));
+}
+
+fn generate_when_sources_ready(
+    time:           Res<Time>,
+    mut wait:       ResMut<WaitWaterSources>,
+    mut commands:   Commands,
+    mut generator:  NavmeshGenerator,
+    sources:        Query<Entity, With<WaterNavmeshSource>>,
+    mut navgendata: ResMut<NavmeshGenerationData>,
+) {
+    if !wait.0.tick(time.delta()).is_finished() {
+        return;
+    }
+    commands.remove_resource::<WaitWaterSources>();
+
+    if sources.is_empty() {
+        info!("[NAV] [water] No navigable water: skipping the water navmesh");
+        navgendata.skip(PGNavmeshType::Water);
+        return;
+    }
+    let Some(mut settings) = navgendata.water_settings.clone() else { return };
+    // Only the prepared water surfaces: terrain, statics and everything else stay out.
+    settings.filter = Some(sources.iter().collect::<HashSet<Entity>>());
     let navmesh = generator.generate(settings);
-    // commands.spawn(DetailNavmeshGizmo::new(&navmesh));
     navgendata.add_handle(PGNavmeshType::Water, navmesh);
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-
-
-
-#[derive(Component)]
-pub(crate) struct WaterNavmeshSource;
-
-#[derive(Event)]
-pub(crate) struct WaterNavmeshesReady;
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct WaterVertex {
-   pub(crate) x_u: usize,
-   pub(crate) z_u: usize,
-   pub(crate) loc: Vec3A,
-   pub(crate) group: usize
-}
-
-impl PartialEq for WaterVertex {
-    fn eq(&self, other: &Self) -> bool {
-        self.x_u == other.x_u && self.z_u == other.z_u
-    }
-}
-
-impl Eq for WaterVertex {}
-
-impl PartialOrd for WaterVertex {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for WaterVertex {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Sort by x_u first, then by z_u
-        match self.x_u.cmp(&other.x_u) {
-            std::cmp::Ordering::Equal => self.z_u.cmp(&other.z_u),
-            other => other,
-        }
-    }
-}
-
-fn raycasts_rain(
-    xs:             &Vec<f32>,
-    zs:             &Vec<f32>,
-    // ray_target_meshes:     &Vec<RayTargetMesh>,
-    trmd:           &TerrainRayMeshData,
-    waters:         &Vec<(AABB, f32)>
-) ->  Vec<WaterVertex> {
-
-    let raycast_map: DashMap<(usize, usize), Vec3A> = DashMap::new();
-    xs.par_iter()
-      .enumerate()
-      .flat_map(|(x_index, &x)| 
-            zs.par_iter()
-              .enumerate()
-              .map(move |(z_index, &z)| (x_index, x, z_index, z)))
-              .for_each(|(x_index, x, z_index, z)|{
-
-        let ray: NavRay = NavRay::down(x, z);
-
-        // Check against the terrain
-        if let Some((terrain_height, _group_id, _normal)) = trmd.test(&ray){
-
-            let mut maybe_water_height: Option<f32> = None;
-            for (water_aabb, water_height) in waters.iter(){
-                if water_aabb.has_point(Vec2::new(x,z)){
-                    maybe_water_height = Some(*water_height);
-                    break;
-                }
-            }
-
-            if let Some(water_height) = maybe_water_height {
-                if terrain_height <= water_height {
-                    let tile = (x_index, z_index);
-                    let loc = Vec3A::new(x, water_height, z);
-                    raycast_map.insert(tile, loc);
-                }
-            }
-        }
-    });
-
-    let mut v_waters = raycast_map.clone().into_iter().map(|(tile, loc)| WaterVertex{x_u: tile.0, z_u: tile.1, loc: loc, group: 0}).collect::<Vec<WaterVertex>>();
-    v_waters.sort_by(|a, b| {
-        a.x_u
-            .partial_cmp(&b.x_u)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                a.z_u
-                    .partial_cmp(&b.z_u)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-    });
-    return v_waters;
-}
-
-
-fn group_waters(
-    v_waters: &mut Vec<WaterVertex>, 
-    maxx: i32, 
-    maxz: i32
-) -> HashMap<(usize, usize), WaterVertex> {
-
-    let adjs: [(isize, isize); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1,-1), (1,1), (-1, 1), (1, -1)];
-    let max_x = maxx as isize;
-    let max_z = maxz as isize;
-
-    let mut group_map: HashMap<(usize, usize), WaterVertex> = v_waters.iter().map(|v| ((v.x_u, v.z_u), *v)).collect::<HashMap<(usize, usize), WaterVertex>>();
-    let mut global_group: usize = 1;
-
-    for vertex in v_waters.iter(){
-        if group_map.get(&(vertex.x_u, vertex.z_u)).map_or(false, |v| v.group != 0) {
-            continue;
-        }
-
-        let mut local_group: Option<usize> = None;
-        for adj in adjs.iter() {
-            let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
-            if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
-                continue;
-            }
-            let u_key = (key.0 as usize, key.1 as usize);
-
-            if let Some(vertex) = group_map.get(&u_key){
-                if vertex.group != 0 {
-                    local_group = Some(vertex.group);
-                    break;
-                }
-            }
-        }
-
-        if local_group.is_none(){
-            local_group = Some(global_group);
-            global_group += 1;
-        }
-
-        if let Some(local_group) = local_group {
-
-            for adj in adjs.iter() {
-                let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
-                if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
-                    continue;
-                }
-
-                let u_key = (key.0 as usize, key.1 as usize);
-                if let Some(vertex) = group_map.get_mut(&u_key){
-                    vertex.group = local_group;
-                }
-            }
-
-            if let Some(vertex) = group_map.get_mut(&(vertex.x_u, vertex.z_u)){
-                vertex.group = local_group;
-            }
-        }
+    fn lake() -> WaterArea {
+        WaterArea { min: Vec2::new(-10.0, -10.0), max: Vec2::new(10.0, 10.0), height: 0.0 }
     }
 
-    // 2nd pass
-    loop {
-        let mut group_pairs: HashSet<(usize, usize)> = HashSet::new();
-        let mut used: HashSet<usize> = HashSet::new();
-
-        for (_tile, vertex) in group_map.iter(){
-            if used.contains(&vertex.group){
-                continue;
-            }
-
-            for adj in adjs.iter() {
-                let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
-                if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
-                    continue;
-                }
-                let u_key = (key.0 as usize, key.1 as usize);
-                if let Some(vertex2) = group_map.get(&u_key){
-                    if used.contains(&vertex2.group){
-                        continue;
-                    }
-
-                    if vertex2.group != vertex.group {
-                        let ming = vertex.group.min(vertex2.group);
-                        let maxg = vertex.group.max(vertex2.group);
-                        group_pairs.insert((ming, maxg));
-                        used.insert(ming);
-                        used.insert(maxg);
-                    }
-                }
-            }
-        }
-        if group_pairs.len() == 0 {
-            break;
-        }
-
-        for pair in group_pairs.iter(){
-            for (_tile, vertex) in group_map.iter_mut(){
-                if vertex.group == pair.1 {
-                    vertex.group = pair.0;
-                }
-            }
-        }
+    #[test]
+    fn island_becomes_a_hole_and_open_sea_stays_water() {
+        // Island: terrain above water within 3 units of the centre; deep bed elsewhere.
+        // Past x = 6 there is no terrain at all (open sea beyond the plane's edge).
+        let terrain = |p: Vec2| if p.x > 6.0 { None } else if p.length() < 3.0 { Some(1.0) } else { Some(-2.0) };
+        let (cols, rows, mask) = water_mask(&lake(), 1.0, 0.5, terrain, |_| false);
+        assert_eq!((cols, rows), (20, 20));
+        let at = |x: f32, z: f32| {
+            let c = (x + 10.0) as usize;
+            let r = (z + 10.0) as usize;
+            mask[r * cols + c]
+        };
+        assert!(!at(0.0, 0.0), "island is not water");
+        assert!(at(-8.0, -8.0), "deep lake bed is water");
+        assert!(at(9.0, 0.0), "no terrain = open water");
     }
 
-    // let unique_groups = group_map.iter().map(|v| v.1.group).collect::<HashSet<usize>>();
+    #[test]
+    fn shallow_water_and_obstacles_are_excluded() {
+        let shallow = |_: Vec2| Some(-0.2); // 0.2 deep, boats need 0.5
+        let (_, _, mask) = water_mask(&lake(), 1.0, 0.5, shallow, |_| false);
+        assert!(mask.iter().all(|w| !w));
 
-    // 3rd pass - keep only boundary points
-    let mut to_rm: Vec<(usize, usize)> = Vec::new();
-    for (tile, vertex) in group_map.iter(){
-        let mut adj_count: usize = 0;
-
-        for adj in adjs.iter() {
-            let key:(isize, isize) = (adj.0 + vertex.x_u as isize, adj.1 + vertex.z_u as isize);
-            if (key.0 < 0) | (key.1 < 0) | (key.0 > max_x) | (key.1 > max_z) {
-                continue;
-            }
-            let u_key = (key.0 as usize, key.1 as usize);
-            if let Some(_vertex2) = group_map.get(&u_key){
-                adj_count += 1;
-            }
-        }
-        if adj_count == 8 {
-            to_rm.push(*tile);
-        }
+        let deep = |_: Vec2| Some(-5.0);
+        let dock = |p: Vec2| p.x.abs() < 2.0 && p.y.abs() < 2.0;
+        let (cols, _, mask) = water_mask(&lake(), 1.0, 0.5, deep, dock);
+        assert!(!mask[10 * cols + 10], "under the dock");
+        assert!(mask[0]);
     }
 
-    for tile in to_rm.iter(){
-        group_map.remove(tile);
-    }
-    return group_map;
-}
-
-
-fn mesh_from_triangles(
-    triangles: &Vec<[Vec3A; 3]>
-) -> Mesh {
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut indices = Vec::new();
-    for (tri_idx, triangle) in triangles.iter().enumerate() {
-        let [v0, v1, v2] = triangle;
-        positions.push([v0.x, v0.y, v0.z]);
-        positions.push([v1.x, v1.y, v1.z]);
-        positions.push([v2.x, v2.y, v2.z]);
-
-        normals.push([0.0, 1.0, 0.0]);
-        normals.push([0.0, 1.0, 0.0]);
-        normals.push([0.0, 1.0, 0.0]);
-        let base_idx = (tri_idx * 3) as u16;
-        indices.push(base_idx);
-        indices.push(base_idx + 2);
-        indices.push(base_idx + 1);
+    #[test]
+    fn mesh_merges_rows_and_faces_up() {
+        let (cols, rows, mask) = water_mask(&lake(), 1.0, 0.5, |_| Some(-5.0), |_| false);
+        let (vertices, indices) = mask_to_mesh(&lake(), 1.0, cols, rows, &mask);
+        assert_eq!(indices.len(), rows * 2, "one quad per full row");
+        for tri in &indices {
+            let [a, b, c] = tri.map(|i| vertices[i as usize]);
+            assert!((b - a).cross(c - a).y > 0.0, "triangle faces up");
+        }
+        let total_area: f32 = indices
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|i| vertices[i as usize]);
+                (b - a).cross(c - a).length() * 0.5
+            })
+            .sum();
+        assert!((total_area - 400.0).abs() < 1e-3, "covers the whole lake: {total_area}");
     }
 
-    let water_simple_mesh = Mesh::new(
-        bevy::render::render_resource::PrimitiveTopology::TriangleList,
-        bevy::asset::RenderAssetUsages::default(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-    .with_inserted_indices(bevy::mesh::Indices::U16(indices));
-
-    return water_simple_mesh;
-}
-
-
-fn triangulate(
-    vertices: &mut Vec<Vec3A>
-) -> Vec<[Vec3A; 3]> {
-    let flat_vertices: Vec<f64> = vertices
-        .iter()
-        .flat_map(|v| [v.x as f64, v.z as f64])
-        .collect();
-    let triangle_indices = earcutr::earcut(&flat_vertices, &[], 2).unwrap();
-    let triangles: Vec<[Vec3A; 3]> = triangle_indices.chunks(3).map(|chunk| {
-        [
-            vertices[chunk[0]],
-            vertices[chunk[1]],
-            vertices[chunk[2]],
-        ]
-    })
-    .collect();
-    return triangles;
-}
-
-
-fn remove_collinear(
-    vlocs: &mut Vec<Vec3A>
-) -> Vec<Vec3A> {
-    let threshold: f32 = 0.01;
-    let mut result = vec![vlocs[0]];
-
-    for i in 1..vlocs.len() {
-
-        if i == vlocs.len() - 1 {
-            result.push(vlocs[i]);
-            break;
-        }
-
-        let p1 = result[result.len() - 1];
-        let p2 = vlocs[i];
-        let p3 = vlocs[i + 1];
-        let v1x = p2.x - p1.x;
-        let v1y = p2.z - p1.z;
-        let v2x = p3.x - p1.x;
-        let v2y = p3.z - p1.z;
-        let cross = (v1x * v2y - v1y * v2x).abs();
-        let len_a = (v1x * v1x + v1y * v1y).sqrt();
-        let len_b = (v2x * v2x + v2y * v2y).sqrt();
-        if len_a < 1e-6 || len_b < 1e-6 {
-            continue; // degenerate segment, skip
-        }
-
-        let normalized_cross = cross / (len_a * len_b);
-        if normalized_cross > threshold {
-            result.push(p2);
-        }
-
-        // info!("cross: {}", cross);
-        // if cross > threshold {
-        //     result.push(p2);
-        // }
-    }
-    result.push(vlocs[vlocs.len() - 1]);
-
-    return result;
-}
-
-
-fn order_boundary(
-    vertices: &mut Vec<WaterVertex>, 
-    maxx: i32, 
-    maxz: i32
-) -> Vec<Vec3A>{
-    let max_x: isize = maxx as isize;
-    let max_z: isize = maxz as isize;
-
-    let mut new_order: Vec<Vec3A> = Vec::with_capacity(vertices.len());
-    let mut used: HashSet<(usize, usize)> = HashSet::new();
-    vertices.sort();
-
-    let mut current = vertices[0];
-    new_order.push(current.loc);
-    used.insert((current.x_u, current.z_u));
-    
-    let madjs: [(isize, isize); 4] = [(1, 0), (0, 1), (0, -1), (-1, 0)];
-    let dadjs: [(isize, isize); 4] = [(-1, -1), (1, 1), (1, -1), (-1, 1)];
-
-    loop {
-        let mut next: Option<WaterVertex> = None;
-        for adj in madjs.iter(){
-            let adj_x = current.x_u as isize + adj.0;
-            let adj_z = current.z_u as isize + adj.1;
-
-            if (adj_x >= 0) & (adj_x <= max_x) & (adj_z >= 0) & (adj_z <= max_z){
-                for v in vertices.iter(){
-                    if used.contains(&(v.x_u, v.z_u)){
-                        continue;
-                    }
-
-                    if (adj_x as usize == v.x_u) & (adj_z as usize == v.z_u){
-                        next = Some(*v);
-                        break; 
-                    }
-                }
+    #[test]
+    fn height_grid_samples_a_sculpted_plane() {
+        let mut mesh = Plane3d::default().mesh().size(10.0, 10.0).subdivisions(1).build();
+        if let Some(VertexAttributeValues::Float32x3(p)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+            for v in p.iter_mut() {
+                v[1] = v[0]; // height = x: a ramp from -5 to 5
             }
         }
-
-        if let Some(next) = next {
-            used.insert((current.x_u, current.z_u));
-            current = next;
-            new_order.push(current.loc);
-        } else {
-            for adj in dadjs.iter(){
-                let adj_x = current.x_u as isize + adj.0;
-                let adj_z = current.z_u as isize + adj.1;
-
-                if (adj_x > 0) & (adj_x <= max_x) & (adj_z > 0) & (adj_z <= max_z){
-                    for v in vertices.iter(){
-                        if used.contains(&(v.x_u, v.z_u)){
-                            continue;
-                        }
-
-                        if (adj_x as usize == v.x_u) & (adj_z as usize == v.z_u){
-                            next = Some(*v);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if let Some(next) = next {
-                used.insert((current.x_u, current.z_u));
-                current = next;
-                new_order.push(current.loc);
-            } else {
-                break;
-            }
-
-        }
-
+        let grid = HeightGrid::from_mesh(&mesh, &GlobalTransform::from_xyz(100.0, 1.0, 0.0)).unwrap();
+        // World x = 100 is the plane's centre: ramp height 0, plus the plane's y offset of 1.
+        assert!((grid.height_at(Vec2::new(100.0, 0.0)).unwrap() - 1.0).abs() < 1e-4);
+        assert!((grid.height_at(Vec2::new(102.5, 3.0)).unwrap() - 3.5).abs() < 1e-4);
+        assert!(grid.height_at(Vec2::new(0.0, 0.0)).is_none(), "outside the terrain");
     }
-
-    return new_order;
-}
-
-
-
-#[allow(dead_code)]
-fn extract_trimesh(mesh: &Mesh) -> (Vec<Vec3>, Vec<[u32; 3]>) {
-    // Extract vertices
-    let Some(VertexAttributeValues::Float32x3(positions)) =
-        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-    else {
-        return (vec![], vec![]);
-    };
-
-    let vertices: Vec<Vec3> = positions
-        .iter()
-        .map(|p| Vec3::new(p[0], p[1], p[2]))
-        .collect();
-
-    // Extract indices
-    let indices: Vec<[u32; 3]> = match mesh.indices() {
-        Some(Indices::U32(idx)) => idx.chunks_exact(3)
-            .map(|t| [t[0], t[1], t[2]])
-            .collect(),
-        Some(Indices::U16(idx)) => idx.chunks_exact(3)
-            .map(|t| [t[0] as u32, t[1] as u32, t[2] as u32])
-            .collect(),
-        None => return (vec![], vec![]),
-    };
-
-    (vertices, indices)
 }
