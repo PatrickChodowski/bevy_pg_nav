@@ -27,6 +27,7 @@ use bevy::mesh::{Mesh, VertexAttributeValues};
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy_rerecast::generator::NavmeshGenerator;
+use bevy_rerecast::NavmeshSettings;
 
 use bevy_pg_core::prelude::WaterChunk;
 use crate::pgnavmesh::PGNavmeshType;
@@ -102,6 +103,13 @@ impl HeightGrid {
             heights[zi * xs.len() + xi] = p.y;
         }
         Some(Self { xs, zs, heights })
+    }
+
+    /// The terrain's XZ extent (world space): min and max corner.
+    pub(crate) fn bounds(&self) -> (Vec2, Vec2) {
+        let (x0, x1) = (self.xs[0], self.xs[self.xs.len() - 1]);
+        let (z0, z1) = (self.zs[0], self.zs[self.zs.len() - 1]);
+        (Vec2::new(x0, z0), Vec2::new(x1, z1))
     }
 
     /// Terrain height at (x, z), bilinear between grid vertices. None outside the terrain.
@@ -226,6 +234,14 @@ fn water_area(mesh: &Mesh, transform: &GlobalTransform) -> Option<WaterArea> {
     (max.x > min.x && max.z > min.z).then(|| WaterArea { min: min.xz(), max: max.xz(), height: (min.y + max.y) * 0.5 })
 }
 
+/// Smallest input extent (world units) Recast can build a navmesh from with these settings:
+/// border = walkable radius + 3 cells on each side, plus room for a few cells in between.
+pub(crate) fn min_recast_extent(settings: &NavmeshSettings) -> f32 {
+    let cell = settings.agent_radius / settings.cell_size_fraction.max(1e-3);
+    let walkable_radius = (settings.agent_radius / cell.max(1e-6)).ceil();
+    (2.0 * (walkable_radius + 3.0) + 4.0) * cell
+}
+
 /// Builds the boat-usable water surfaces once the terrain and nav-static colliders exist.
 fn spawn_water_sources(
     _trigger:     On<CollidersReady>,
@@ -255,6 +271,7 @@ fn spawn_water_sources(
     // standing in water... Only the parts within a boat's height above the water count, so a
     // high bridge doesn't block.
     let boat_height = navgendata.water_settings.as_ref().map(|s| s.agent_height).unwrap_or(2.0);
+    let min_water_extent = navgendata.water_settings.as_ref().map(min_recast_extent).unwrap_or(0.0);
     let obstacle_triangles: Vec<[Vec3; 3]> = statics
         .iter()
         .filter(|(_, _, s)| s.water)
@@ -266,7 +283,17 @@ fn spawn_water_sources(
     let mut sources = 0;
     let mut ceilings = 0;
     for (mesh3d, transform) in &waters {
-        let Some(area) = meshes.get(&mesh3d.0).and_then(|m| water_area(m, transform)) else { continue };
+        let Some(mut area) = meshes.get(&mesh3d.0).and_then(|m| water_area(m, transform)) else { continue };
+        // Only this plane's part of the water: with several terrain tiles in the scene, the
+        // other tiles' sea would otherwise count as deep water (no ground known there).
+        if let Some(terrain) = &terrain {
+            let (lo, hi) = terrain.bounds();
+            area.min = area.min.max(lo);
+            area.max = area.max.min(hi);
+            if area.min.x >= area.max.x || area.min.y >= area.max.y {
+                continue; // water elsewhere
+            }
+        }
 
         if let Some(max_depth) = cut_depth {
             let (cols, rows, mask) = water_mask(&area, WATER_CELL, max_depth, ground, |_| false);
@@ -305,6 +332,14 @@ fn spawn_water_sources(
         let (vertices, indices) = mask_to_mesh(&area, WATER_CELL, cols, rows, &mask);
         if indices.is_empty() {
             info!("[NAV] [water] Water plane at {:?} has no water deep enough for boats", area.min);
+            continue;
+        }
+        // Recast (non-tiled) needs the input wider than twice its border, or it underflows
+        // (rerecast contours: `width - border_size * 2`). Such a patch is too small for boats anyway.
+        let extent = vertices.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), v| (lo.min(v.xz()), hi.max(v.xz())));
+        let extent = extent.1 - extent.0;
+        if extent.x < min_water_extent || extent.y < min_water_extent {
+            info!("[NAV] [water] Deep water at {:?} is only {:.1} x {:.1}: too small for boats, skipped", area.min, extent.x, extent.y);
             continue;
         }
         navgendata.water_heights.push(area.height);

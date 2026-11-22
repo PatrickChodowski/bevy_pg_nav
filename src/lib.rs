@@ -14,7 +14,7 @@ mod statics;
 pub mod prelude {
     pub use crate::pathfinding::{Path, PathFinder, SearchStep};
     pub use crate::plugin::{
-        GenerateNavMesh, PGNavPlugin, NavmeshTerrain, NavmeshWater, NavStatic, NavResources
+        GenerateNavMesh, NavmeshGenerationFinished, PGNavPlugin, NavmeshTerrain, NavmeshWater, NavStatic, NavResources
     };
     pub use crate::statics::{NavOverrides, NavOverrideRule, NavShape};
     pub use crate::mesh::{PGNavmeshMesh, spawn_navmesh_mesh};

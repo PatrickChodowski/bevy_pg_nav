@@ -110,6 +110,7 @@ fn check_navgendata(
         }
 
         commands.remove_resource::<NavmeshGenerationData>();
+        commands.trigger(NavmeshGenerationFinished { name: navgendata.name.clone(), plane_entity: navgendata.plane_entity });
 
         for entity in nav_colliders.iter(){
             commands.entity(entity).remove::<Collider>();
@@ -140,6 +141,14 @@ pub struct NavmeshWater;
 
 #[derive(Component)]
 pub struct NavmeshTerrain;
+
+/// Sent when every navmesh requested by a [`GenerateNavMesh`] has been built and spawned
+/// (as `PGNavmesh` entities named `name`).
+#[derive(Event, Clone, Debug)]
+pub struct NavmeshGenerationFinished {
+    pub name: String,
+    pub plane_entity: Entity,
+}
 
 #[derive(Event)]
 pub struct GenerateNavMesh {
