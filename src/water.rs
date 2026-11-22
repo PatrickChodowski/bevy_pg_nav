@@ -5,7 +5,8 @@
 //! 1. For every water plane (entities with `WaterChunk`), its real extent (mesh bounds x world
 //!    transform) is rasterised into a grid of `WATER_CELL` cells. A cell is water when the
 //!    terrain under it is at least `water_min_depth` below the surface (or there is no terrain,
-//!    e.g. open sea past the plane's edge) and no nav static (dock, pier, building...) covers it.
+//!    e.g. open sea past the plane's edge) and no scene object (dock, pier, building...) comes
+//!    down there to within a boat's height of the water (statics.rs).
 //! 2. Water cells become a flat mesh at the water height (row runs merged into strips). Islands
 //!    and shorelines are just holes and edges in that mesh: no boundary tracing or polygon
 //!    triangulation needed, so any shape works, including lakes with islands.
@@ -14,8 +15,14 @@
 //!
 //! Terrain heights are sampled from the plane's vertex grid (bilinear, constant time per cell)
 //! instead of raycasting every triangle per cell.
+//!
+//! Optionally (`terrain_max_water_depth`) the same mask cuts the *terrain* navmesh: where the
+//! water is deeper than that, a downward-facing "ceiling" is placed just above the ground for the
+//! terrain generation only. Recast sees too little headroom under it and leaves that ground out
+//! (eroding the edge by the agent radius), so people can wade in the shallows but not walk along
+//! the bottom of a lake.
 
-use avian3d::prelude::{Collider, RigidBody, Rotation, SimpleCollider};
+use avian3d::prelude::{Collider, RigidBody};
 use bevy::mesh::{Mesh, VertexAttributeValues};
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -25,6 +32,7 @@ use bevy_pg_core::prelude::WaterChunk;
 use crate::pgnavmesh::PGNavmeshType;
 use crate::plugin::{NavStatic, NavmeshGenerationData};
 use crate::terrain::CollidersReady;
+use crate::statics::{stamp_footprint, world_triangles};
 
 /// Size of the water mask cells (world units). Recast smooths the staircase edges afterwards.
 const WATER_CELL: f32 = 0.5;
@@ -44,6 +52,15 @@ impl Plugin for PGWaterNavPlugin {
 
 #[derive(Component)]
 pub(crate) struct WaterNavmeshSource;
+
+/// Temporary obstacle above deep-water ground, used only by the terrain navmesh generation.
+#[derive(Component)]
+pub(crate) struct UnderwaterCeiling;
+
+/// All temporary navmesh sources (water surfaces, underwater ceilings) are registered by physics:
+/// the terrain and water navmeshes can be generated.
+#[derive(Event)]
+pub(crate) struct NavSourcesReady;
 
 #[derive(Resource)]
 struct WaitWaterSources(Timer);
@@ -168,6 +185,39 @@ pub(crate) fn mask_to_mesh(area: &WaterArea, cell: f32, cols: usize, rows: usize
     (vertices, indices)
 }
 
+/// Downward-facing quads `lift` above the ground over the mask's cells (cells without ground are
+/// skipped). Facing down makes them unwalkable themselves; their low height leaves the ground
+/// under them without headroom, so Recast drops it from the terrain navmesh.
+pub(crate) fn ceiling_mesh(
+    area: &WaterArea,
+    cell: f32,
+    cols: usize,
+    rows: usize,
+    mask: &[bool],
+    ground: impl Fn(Vec2) -> Option<f32>,
+    lift: f32,
+) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for r in 0..rows {
+        for c in 0..cols {
+            if !mask[r * cols + c] {
+                continue;
+            }
+            let lo = area.min + Vec2::new(c as f32, r as f32) * cell;
+            let hi = (lo + Vec2::splat(cell)).min(area.max);
+            let Some(centre) = ground((lo + hi) * 0.5) else { continue };
+            let corner = |x: f32, z: f32| Vec3::new(x, ground(Vec2::new(x, z)).unwrap_or(centre) + lift, z);
+            let base = vertices.len() as u32;
+            vertices.extend([corner(lo.x, lo.y), corner(hi.x, lo.y), corner(hi.x, hi.y), corner(lo.x, hi.y)]);
+            // Clockwise seen from above: the surface faces down.
+            indices.push([base, base + 1, base + 2]);
+            indices.push([base, base + 2, base + 3]);
+        }
+    }
+    (vertices, indices)
+}
+
 /// World-space area of a water plane from its mesh and transform.
 fn water_area(mesh: &Mesh, transform: &GlobalTransform) -> Option<WaterArea> {
     let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
@@ -184,11 +234,14 @@ fn spawn_water_sources(
     mut navgendata: ResMut<NavmeshGenerationData>,
     terrains:     Query<(&Mesh3d, &GlobalTransform)>,
     waters:       Query<(&Mesh3d, &GlobalTransform), With<WaterChunk>>,
-    statics:      Query<(&Collider, &GlobalTransform), With<NavStatic>>,
+    statics:      Query<(&Mesh3d, &GlobalTransform, &NavStatic)>,
 ) {
-    if navgendata.water_settings.is_none() {
-        return;
-    }
+    let make_water = navgendata.water_settings.is_some();
+    let cut_depth = navgendata.terrain_max_water_depth;
+    // Ceiling height above deep-water ground: above the climb (so Recast keeps it a separate span
+    // from the ground) but below the agent height (so the ground has too little headroom).
+    let terrain_settings = navgendata.terrain_settings.clone().unwrap_or_default();
+    let ceiling_lift = (terrain_settings.walkable_climb + terrain_settings.agent_height) * 0.5;
 
     let terrain = terrains
         .get(navgendata.plane_entity)
@@ -198,27 +251,57 @@ fn spawn_water_sources(
         warn!("[NAV] [water] Terrain plane isn't a regular vertex grid; treating all water as deep");
     }
 
-    // Docks, piers, buildings... block boats where they stand (their collider's footprint).
-    let obstacles: Vec<(Vec2, Vec2)> = statics
+    // Scene objects block boats with their own triangles (statics.rs): docks, piers, buildings
+    // standing in water... Only the parts within a boat's height above the water count, so a
+    // high bridge doesn't block.
+    let boat_height = navgendata.water_settings.as_ref().map(|s| s.agent_height).unwrap_or(2.0);
+    let obstacle_triangles: Vec<[Vec3; 3]> = statics
         .iter()
-        .map(|(collider, transform)| {
-            let (_, rotation, translation) = transform.to_scale_rotation_translation();
-            let aabb = collider.aabb(translation, Rotation(rotation), 0.0);
-            (aabb.min.xz(), aabb.max.xz())
-        })
+        .filter(|(_, _, s)| s.water)
+        .filter_map(|(mesh3d, transform, _)| Some(world_triangles(meshes.get(&mesh3d.0)?, transform)))
+        .flatten()
         .collect();
-    let blocked = |p: Vec2| obstacles.iter().any(|(lo, hi)| p.cmpge(*lo).all() && p.cmple(*hi).all());
 
+    let ground = |p: Vec2| terrain.as_ref().and_then(|t| t.height_at(p));
     let mut sources = 0;
+    let mut ceilings = 0;
     for (mesh3d, transform) in &waters {
         let Some(area) = meshes.get(&mesh3d.0).and_then(|m| water_area(m, transform)) else { continue };
-        let (cols, rows, mask) = water_mask(
+
+        if let Some(max_depth) = cut_depth {
+            let (cols, rows, mask) = water_mask(&area, WATER_CELL, max_depth, ground, |_| false);
+            let (vertices, indices) = ceiling_mesh(&area, WATER_CELL, cols, rows, &mask, ground, ceiling_lift);
+            if !indices.is_empty() {
+                commands.spawn((
+                    Name::new("Underwater navmesh ceiling"),
+                    UnderwaterCeiling,
+                    Collider::trimesh(vertices, indices),
+                    RigidBody::Static,
+                    Transform::IDENTITY,
+                ));
+                ceilings += 1;
+            }
+        }
+
+        if !make_water {
+            continue;
+        }
+        let (cols, rows, mut mask) = water_mask(
             &area,
             WATER_CELL,
             navgendata.water_min_depth,
             |p| terrain.as_ref().and_then(|t| t.height_at(p)),
-            blocked,
+            |_| false,
         );
+        for tri in &obstacle_triangles {
+            let low = tri[0].y.min(tri[1].y).min(tri[2].y);
+            let (lo, hi) = (tri[0].xz().min(tri[1].xz()).min(tri[2].xz()), tri[0].xz().max(tri[1].xz()).max(tri[2].xz()));
+            let outside = hi.x < area.min.x || hi.y < area.min.y || lo.x > area.max.x || lo.y > area.max.y;
+            if outside || low > area.height + boat_height {
+                continue;
+            }
+            stamp_footprint(&mut mask, cols, rows, area.min, WATER_CELL, tri.map(|v| v.xz()));
+        }
         let (vertices, indices) = mask_to_mesh(&area, WATER_CELL, cols, rows, &mask);
         if indices.is_empty() {
             info!("[NAV] [water] Water plane at {:?} has no water deep enough for boats", area.min);
@@ -234,7 +317,7 @@ fn spawn_water_sources(
         ));
         sources += 1;
     }
-    info!("[NAV] [water] {sources} water surface(s) prepared");
+    info!("[NAV] [water] {sources} water surface(s), {ceilings} underwater ceiling(s) prepared");
     commands.insert_resource(WaitWaterSources(Timer::from_seconds(WATER_SOURCES_WAIT_SECS, TimerMode::Once)));
 }
 
@@ -250,7 +333,11 @@ fn generate_when_sources_ready(
         return;
     }
     commands.remove_resource::<WaitWaterSources>();
+    commands.trigger(NavSourcesReady); // terrain navmesh (terrain.rs)
 
+    if navgendata.water_settings.is_none() {
+        return;
+    }
     if sources.is_empty() {
         info!("[NAV] [water] No navigable water: skipping the water navmesh");
         navgendata.skip(PGNavmeshType::Water);
@@ -319,6 +406,22 @@ mod tests {
             })
             .sum();
         assert!((total_area - 400.0).abs() < 1e-3, "covers the whole lake: {total_area}");
+    }
+
+    #[test]
+    fn ceiling_covers_deep_water_ground_only_and_faces_down() {
+        // Ground at -3 (deep) for x < 0, -0.2 (wading depth) for x >= 0.
+        let ground = |p: Vec2| Some(if p.x < 0.0 { -3.0 } else { -0.2 });
+        let (cols, rows, mask) = water_mask(&lake(), 1.0, 0.6, ground, |_| false);
+        let (vertices, indices) = ceiling_mesh(&lake(), 1.0, cols, rows, &mask, ground, 1.0);
+        assert_eq!(indices.len(), 10 * 20 * 2, "only the deep half");
+        assert!(vertices.iter().all(|v| v.x <= 0.0), "no ceiling over the wading area");
+        // 1 above the deep ground (corners on the x = 0 boundary follow the ground there).
+        assert!(vertices.iter().filter(|v| v.x < -0.5).all(|v| (v.y - -2.0).abs() < 1e-4));
+        for tri in &indices {
+            let [a, b, c] = tri.map(|i| vertices[i as usize]);
+            assert!((b - a).cross(c - a).y < 0.0, "faces down");
+        }
     }
 
     #[test]

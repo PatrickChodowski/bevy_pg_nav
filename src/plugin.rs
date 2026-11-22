@@ -11,18 +11,24 @@ use bevy_rerecast::prelude::*;
 use avian_rerecast::AvianBackendPlugin;
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::multi_nav::PGMultiNavPlugin;
-use crate::water::{PGWaterNavPlugin, WaterNavmeshSource};
+use crate::water::{PGWaterNavPlugin, WaterNavmeshSource, UnderwaterCeiling};
 use crate::terrain::{PGTerrainNavPlugin, GenerateTerrainNavmesh};
 use crate::recast_convert::convert_rerecast;
 use crate::pgnavmesh::{PGNavmesh, PGNavmeshType};
+use crate::statics::{NavOverrides, NavShape};
 
-pub struct PGNavPlugin{
-    pub colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>
+/// Navmesh generation and loading. Scene objects become obstacles automatically from their
+/// meshes (see statics.rs); `nav_overrides` optionally names a JSON asset with exceptions.
+#[derive(Default)]
+pub struct PGNavPlugin {
+    /// Asset path of the obstacle overrides (`*.overrides.json`), e.g.
+    /// "terrain/nav.overrides.json". None = no overrides.
+    pub nav_overrides: Option<String>,
 }
 
 #[derive(Resource)]
 pub struct NavResources {
-    pub(crate) colliders_mapping: fn(object_name: String) -> Option<(Collider, NavStatic)>,
+    pub(crate) overrides: Option<Handle<NavOverrides>>,
     pub visible: bool
 }
 
@@ -39,14 +45,17 @@ impl Plugin for PGNavPlugin {
             NavmeshPlugins::default(),
             AvianBackendPlugin::default(),
             JsonAssetPlugin::<PGNavmesh>::new(&["nav.json"]),
+            JsonAssetPlugin::<NavOverrides>::new(&["overrides.json"]),
             PGTerrainNavPlugin,
             PGWaterNavPlugin,
             PGMultiNavPlugin
         ))
         .insert_resource(NavResources{
-            colliders_mapping: self.colliders_mapping,
+            overrides: None,
             visible: false
         })
+        .insert_resource(NavOverridesPath(self.nav_overrides.clone()))
+        .add_systems(Startup, load_nav_overrides)
         .insert_resource(NavHandlesHolders::new())
         .add_observer(on_generate_navmesh)
         .add_observer(on_ready_navmesh)
@@ -54,6 +63,15 @@ impl Plugin for PGNavPlugin {
         .add_systems(Update, check_navgendata.run_if(resource_exists_and_changed::<NavmeshGenerationData>))
         // .add_systems(Update, toggle_visibility) //.run_if(resource_changed::<NavResources>))
         ;
+    }
+}
+
+#[derive(Resource)]
+struct NavOverridesPath(Option<String>);
+
+fn load_nav_overrides(path: Res<NavOverridesPath>, ass: Res<AssetServer>, mut navres: ResMut<NavResources>) {
+    if let Some(path) = &path.0 {
+        navres.overrides = Some(ass.load(path.clone()));
     }
 }
 
@@ -73,7 +91,7 @@ fn check_navgendata(
     navgendata:     Res<NavmeshGenerationData>,
     mut commands:   Commands,
     nav_colliders:  Query<Entity, Or<(With<TerrainChunk>, With<NavStatic>)>>,
-    water_sources:  Query<Entity, With<WaterNavmeshSource>>,
+    water_sources:  Query<Entity, Or<(With<WaterNavmeshSource>, With<UnderwaterCeiling>)>>,
     mut handles:    ResMut<NavHandlesHolders>
 ){
 
@@ -106,23 +124,15 @@ fn check_navgendata(
 
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum NavStaticType {
-    Navigable(f32), // Yoffset
-    Blocker
-}
-
-#[derive(Component, Clone, Copy)]
+/// On a scene object while navmeshes are generated: how it takes part (inserted with its
+/// collider by terrain::prepare_terrain_colliders, removed afterwards).
+#[derive(Component, Clone, Copy, Debug)]
 pub struct NavStatic {
-    pub typ:    NavStaticType
-}
-impl NavStatic {
-    pub fn blocker() -> Self {
-        NavStatic{typ: NavStaticType::Blocker}
-    }
-    pub fn navigable() -> Self {
-        NavStatic{typ: NavStaticType::Navigable(0.0)}
-    }
+    pub shape:   NavShape,
+    /// Part of the terrain navmesh's geometry (Recast decides walkable vs blocking).
+    pub terrain: bool,
+    /// Blocks boats where it comes down near the waterline.
+    pub water:   bool,
 }
 
 #[derive(Component)]
@@ -140,6 +150,9 @@ pub struct GenerateNavMesh {
     pub water_settings: Option<NavmeshSettings>,
     /// Minimum water depth for boats (world units): shallower water counts as land.
     pub water_min_depth: f32,
+    /// Leave ground under water deeper than this out of the terrain navmesh (people can wade
+    /// up to this depth). None = keep all underwater ground walkable.
+    pub terrain_max_water_depth: Option<f32>,
 }
 
 // Resource existing only during navmesh creation. Removed after finish
@@ -151,6 +164,7 @@ pub (crate) struct NavmeshGenerationData {
     pub(crate) terrain_settings: Option<NavmeshSettings>,
     pub(crate) water_settings: Option<NavmeshSettings>,
     pub(crate) water_min_depth: f32,
+    pub(crate) terrain_max_water_depth: Option<f32>,
     /// Heights of the water surfaces used for the water navmesh (see water::spawn_water_sources).
     pub(crate) water_heights: Vec<f32>,
 }
@@ -200,6 +214,7 @@ impl NavmeshGenerationData {
             terrain_settings: event.terrain_settings.clone(),
             water_settings: event.water_settings.clone(),
             water_min_depth: event.water_min_depth.max(0.0),
+            terrain_max_water_depth: event.terrain_max_water_depth.map(|d| d.max(0.0)),
             water_heights: Vec::new(),
         };
 

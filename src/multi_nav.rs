@@ -30,7 +30,9 @@ fn on_spawn_nav(
 
     for (entity, nav) in navs.iter(){
 
-        if entity == a_entity {
+        // Only neighbouring navmeshes of the same kind (terrain-terrain across map chunks,
+        // water-water). Terrain and water overlap in the shallows but mustn't be joined.
+        if entity == a_entity || nav.typ != a_nav.typ {
             continue;
         }
 
@@ -44,8 +46,9 @@ fn on_spawn_nav(
         }
 
         if poly_pairs.len() > 0 {
+            // polygon_pairs are (a_nav polygon, nav polygon): entity1 must be a_entity.
             writer.write(ConnectNavs{
-                nav_entity1: entity,
+                nav_entity1: a_entity,
                 nav_entity2: entity,
                 polygon_pairs: poly_pairs
             });

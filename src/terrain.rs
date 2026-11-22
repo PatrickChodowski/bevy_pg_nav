@@ -11,6 +11,9 @@ use bevy_rerecast::NavmeshSettings;
 use bevy_pg_core::prelude::TerrainChunk;
 use crate::pgnavmesh::PGNavmeshType;
 use crate::plugin::{NavResources, NavStatic, NavmeshGenerationData};
+use crate::water::{NavSourcesReady, UnderwaterCeiling};
+use crate::statics::{collider_for, plan_object, world_height, NavOverrides};
+use bevy_pg_core::prelude::EditorAsset;
 use crate::tools::{NavRay, IntersectionData, ray_triangle_intersection};
 
 
@@ -33,11 +36,12 @@ pub(crate) struct GenerateTerrainNavmesh;
 fn prepare_terrain_colliders(
     _trigger:       On<GenerateTerrainNavmesh>,
     terrains:       Query<(&Transform, &TerrainChunk, &Mesh3d)>,
-    statics:        Query<(Entity, &Transform, &Name), With<Mesh3d>>,
+    objects:        Query<(Entity, &Name, &EditorAsset, &Mesh3d, &GlobalTransform)>,
     meshes:         Res<Assets<Mesh>>,
     mut commands:   Commands,
     navgendata:     Res<NavmeshGenerationData>,
-    navres:         Res<NavResources>
+    navres:         Res<NavResources>,
+    overrides:      Res<Assets<NavOverrides>>,
 ){
     let Ok((_terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
@@ -52,12 +56,32 @@ fn prepare_terrain_colliders(
 
     // let collider_trimesh = Collider::trimesh(trimesh.vertices, trimesh.indices);
 
-    for (static_entity, _static_transform, static_name) in statics.iter(){
-        if let Some((collider, nav_object)) = (navres.colliders_mapping)(static_name.to_string()){
-            // info!("Inserting collider for {}", static_name);
-            commands.entity(static_entity).insert((collider, RigidBody::Static, nav_object));
+    // Every scene object becomes an obstacle from its own mesh (statics.rs), except ones lower
+    // than the step height and whatever the overrides file says.
+    let overrides = navres.overrides.as_ref().and_then(|h| overrides.get(h)).cloned().unwrap_or_default();
+    let min_height = navgendata.terrain_settings.as_ref().map(|s| s.walkable_climb).unwrap_or_else(|| NavmeshSettings::default().walkable_climb);
+    let (mut used, mut skipped) = (0, 0);
+    for (entity, name, asset, mesh3d, transform) in &objects {
+        if !matches!(asset, EditorAsset::Scene(_)) {
+            continue; // markers, spawners and water aren't physical obstacles
         }
+        let Some(object_mesh) = meshes.get(&mesh3d.0) else { continue };
+        let Some(plan) = plan_object(name, world_height(object_mesh, transform), min_height, &overrides) else {
+            skipped += 1;
+            continue;
+        };
+        let Some(collider) = collider_for(object_mesh, plan.shape) else {
+            warn!("[NAV] Could not build a {:?} collider for {name}; it won't be an obstacle", plan.shape);
+            continue;
+        };
+        commands.entity(entity).insert((
+            collider,
+            RigidBody::Static,
+            NavStatic { shape: plan.shape, terrain: plan.terrain, water: plan.water },
+        ));
+        used += 1;
     }
+    info!("[NAV] {used} scene object(s) used as navmesh geometry, {skipped} skipped (lower than step height)");
 
     // info!("Inserting collider for terrain: {:?}", collider_trimesh);
     commands.entity(navgendata.plane_entity).insert((heightfield_collider, RigidBody::Static));
@@ -93,12 +117,15 @@ fn wait_for_colliders(
 
 
 
+/// Runs once every navmesh source is registered, including the underwater ceilings that cut
+/// deep-water ground out of the terrain navmesh (water::spawn_water_sources).
 fn generate_terrain_navmesh_on_colliders_ready(
-    _trigger:       On<CollidersReady>,
+    _trigger:       On<NavSourcesReady>,
     mut generator:  NavmeshGenerator,
     mut commands:   Commands,
     mut navgendata: ResMut<NavmeshGenerationData>,
-    navstatics:     Query<Entity, (With<NavStatic>, With<Collider>)>
+    navstatics:     Query<(Entity, &NavStatic), With<Collider>>,
+    ceilings:       Query<Entity, With<UnderwaterCeiling>>,
 ){
 
     info!("[NAV] [on_colliders_ready] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
@@ -115,7 +142,12 @@ fn generate_terrain_navmesh_on_colliders_ready(
     }
     // Only the terrain and the nav statics. Without a filter Recast would take every collider,
     // including the water surfaces built for the boat navmesh (people would walk on water).
-    let mut sources: HashSet<Entity> = navstatics.iter().collect();
+    let mut sources: HashSet<Entity> = navstatics
+        .iter()
+        .filter(|(_, s)| s.terrain)
+        .map(|(e, _)| e)
+        .chain(ceilings.iter())
+        .collect();
     sources.insert(navgendata.plane_entity);
     settings.filter = Some(sources);
 

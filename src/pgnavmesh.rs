@@ -239,6 +239,17 @@ impl PGNavmesh {
         self.bvh = bvh;
     }
 
+    /// Ground-plane (XZ) area of a polygon.
+    fn polygon_area(&self, id: &u32) -> f32 {
+        let Some(polygon) = self.polygons.get(id) else { return 0.0 };
+        let pts: Vec<Vec2> = polygon.vertices.iter().filter_map(|v| self.vertices.get(v)).map(|v| v.loc.xz()).collect();
+        if pts.len() < 3 {
+            return 0.0;
+        }
+        let twice: f32 = (0..pts.len()).map(|i| pts[i].perp_dot(pts[(i + 1) % pts.len()])).sum();
+        twice.abs() * 0.5
+    }
+
     pub(crate) fn islands_removal(&mut self){
         let mut visited: HashSet<u32> = HashSet::new();
         let mut islands: Vec<Vec<u32>> = Vec::new();
@@ -276,13 +287,20 @@ impl PGNavmesh {
 
         }
 
-        // Remove small islands
+        // Remove small islands: by area, not polygon count. Recast covers simple open areas
+        // (a plain lake, a field) with a few big polygons, so counting polygons removed exactly
+        // the big, simple areas. Kept: islands of at least ISLAND_MIN_AREA and at least
+        // ISLAND_MIN_SHARE of the largest one (drops slivers and rooftop-like patches).
         let mut polygons_to_rm: Vec<u32> = Vec::new();
         let mut vertices_to_rm: Vec<u32> = Vec::new();
 
-        const ISLAND_THRESHOLD: usize = 10;
-        for island in islands.iter_mut(){
-            if island.len() <= ISLAND_THRESHOLD {
+        const ISLAND_MIN_AREA: f32 = 4.0;
+        const ISLAND_MIN_SHARE: f32 = 0.02;
+        let areas: Vec<f32> = islands.iter().map(|island| island.iter().map(|id| self.polygon_area(id)).sum()).collect();
+        let largest = areas.iter().copied().fold(0.0_f32, f32::max);
+        let min_area = ISLAND_MIN_AREA.max(largest * ISLAND_MIN_SHARE);
+        for (island, area) in islands.iter_mut().zip(areas) {
+            if area < min_area {
                 for poly_id in island.iter(){
                     vertices_to_rm.extend(self.polygon(poly_id).vertices.iter());
                 }
