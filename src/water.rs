@@ -266,6 +266,15 @@ fn spawn_water_sources(
     if terrain.is_none() {
         warn!("[NAV] [water] Terrain plane isn't a regular vertex grid; treating all water as deep");
     }
+    // Ground of the neighbouring planes too: the water navmesh is built a border beyond the
+    // plane's edges (plugin::build_box), and that border must see their shores.
+    let neighbour_grounds: Vec<HeightGrid> = navgendata
+        .neighbours
+        .iter()
+        .filter_map(|e| terrains.get(*e).ok())
+        .filter_map(|(mesh3d, transform)| HeightGrid::from_mesh(meshes.get(&mesh3d.0)?, transform))
+        .collect();
+    let water_border = navgendata.water_settings.as_ref().map(crate::plugin::border_width).unwrap_or(0.0);
 
     // Scene objects block boats with their own triangles (statics.rs): docks, piers, buildings
     // standing in water... Only the parts within a boat's height above the water count, so a
@@ -279,17 +288,21 @@ fn spawn_water_sources(
         .flatten()
         .collect();
 
-    let ground = |p: Vec2| terrain.as_ref().and_then(|t| t.height_at(p));
+    let ground = |p: Vec2| {
+        terrain.as_ref().and_then(|t| t.height_at(p)).or_else(|| neighbour_grounds.iter().find_map(|g| g.height_at(p)))
+    };
     let mut sources = 0;
     let mut ceilings = 0;
     for (mesh3d, transform) in &waters {
         let Some(mut area) = meshes.get(&mesh3d.0).and_then(|m| water_area(m, transform)) else { continue };
         // Only this plane's part of the water: with several terrain tiles in the scene, the
         // other tiles' sea would otherwise count as deep water (no ground known there).
+        // Only this plane's water plus the border beyond its edges: with several terrain tiles
+        // in the scene, the other tiles' sea would otherwise all end up in this navmesh.
         if let Some(terrain) = &terrain {
             let (lo, hi) = terrain.bounds();
-            area.min = area.min.max(lo);
-            area.max = area.max.min(hi);
+            area.min = area.min.max(lo - water_border);
+            area.max = area.max.min(hi + water_border);
             if area.min.x >= area.max.x || area.min.y >= area.max.y {
                 continue; // water elsewhere
             }
@@ -317,7 +330,7 @@ fn spawn_water_sources(
             &area,
             WATER_CELL,
             navgendata.water_min_depth,
-            |p| terrain.as_ref().and_then(|t| t.height_at(p)),
+            ground,
             |_| false,
         );
         for tri in &obstacle_triangles {
@@ -338,7 +351,9 @@ fn spawn_water_sources(
         // (rerecast contours: `width - border_size * 2`). Such a patch is too small for boats anyway.
         let extent = vertices.iter().fold((Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)), |(lo, hi), v| (lo.min(v.xz()), hi.max(v.xz())));
         let extent = extent.1 - extent.0;
-        if extent.x < min_water_extent || extent.y < min_water_extent {
+        // With a tile, the build box is fixed (plugin::build_box) and the small strips of the
+        // neighbours' water in its border are needed to carry the navmesh up to the tile edge.
+        if navgendata.tile.is_none() && (extent.x < min_water_extent || extent.y < min_water_extent) {
             info!("[NAV] [water] Deep water at {:?} is only {:.1} x {:.1}: too small for boats, skipped", area.min, extent.x, extent.y);
             continue;
         }
@@ -381,6 +396,10 @@ fn generate_when_sources_ready(
     let Some(mut settings) = navgendata.water_settings.clone() else { return };
     // Only the prepared water surfaces: terrain, statics and everything else stay out.
     settings.filter = Some(sources.iter().collect::<HashSet<Entity>>());
+    if let Some(tile) = navgendata.tile {
+        let (low, high) = navgendata.water_heights.iter().fold(navgendata.height_range, |(l, h), w| (l.min(*w), h.max(*w)));
+        settings.aabb = Some(crate::plugin::build_box(tile, (low, high), &settings));
+    }
     let navmesh = generator.generate(settings);
     navgendata.add_handle(PGNavmeshType::Water, navmesh);
 }

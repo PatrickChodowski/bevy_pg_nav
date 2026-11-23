@@ -69,6 +69,18 @@ impl PGPolygon {
         sat_separated(&a, &b) == false
     }
 
+    /// Like [`Self::intersects`], but also true for triangles up to `eps` apart: two navmeshes
+    /// built for neighbouring tiles meet along the seam only up to float rounding.
+    pub (crate) fn touches(
+        &self,
+        other: &PGPolygon,
+        self_pgn: &PGNavmesh,
+        other_pgn: &PGNavmesh,
+        eps: f32,
+    ) -> bool {
+        sat_separated_by(&self.locs(self_pgn), &other.locs(other_pgn), eps) == false
+    }
+
     pub fn center(&self, pgn: &PGNavmesh) -> Vec3 {
         let [a,b,c] = self.locs(pgn);
         return (a + b + c)/3.0;
@@ -304,6 +316,11 @@ fn _line_segments_intersect(
 
 #[inline(always)]
 fn sat_separated(a: &[Vec3; 3], b: &[Vec3; 3]) -> bool {
+    sat_separated_by(a, b, 0.0)
+}
+
+/// Separated on some axis by more than `gap` (world units).
+fn sat_separated_by(a: &[Vec3; 3], b: &[Vec3; 3], gap: f32) -> bool {
     for verts in [a, b] {
         for i in 0..3 {
             let p = verts[i];
@@ -312,8 +329,9 @@ fn sat_separated(a: &[Vec3; 3], b: &[Vec3; 3]) -> bool {
 
             let (a_min, a_max) = project_tri(a, axis);
             let (b_min, b_max) = project_tri(b, axis);
+            let tolerance = gap * (axis.x * axis.x + axis.z * axis.z).sqrt();
 
-            if a_max < b_min || b_max < a_min {
+            if a_max + tolerance < b_min || b_max + tolerance < a_min {
                 return true; // separated
             }
         }

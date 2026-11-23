@@ -176,6 +176,35 @@ pub (crate) struct NavmeshGenerationData {
     pub(crate) terrain_max_water_depth: Option<f32>,
     /// Heights of the water surfaces used for the water navmesh (see water::spawn_water_sources).
     pub(crate) water_heights: Vec<f32>,
+    /// World XZ bounds (min, max) of the plane the navmeshes are for. Set by
+    /// terrain::prepare_terrain_colliders; the navmeshes are built to exactly these edges.
+    pub(crate) tile: Option<(Vec2, Vec2)>,
+    /// Lowest and highest terrain (plane and neighbours), for the build box.
+    pub(crate) height_range: (f32, f32),
+    /// Neighbouring terrain planes given colliders for this generation (see [`build_box`]).
+    pub(crate) neighbours: Vec<Entity>,
+}
+
+/// Width (world units) of the border rerecast leaves out around its build box:
+/// walkable radius + 3 cells, as rerecast's ConfigBuilder computes it.
+pub(crate) fn border_width(settings: &NavmeshSettings) -> f32 {
+    let cell = settings.agent_radius / settings.cell_size_fraction.max(1e-3);
+    ((settings.agent_radius / cell.max(1e-6)).ceil() + 3.0) * cell
+}
+
+/// The box Recast builds in: the plane's tile grown by exactly the border rerecast leaves out.
+///
+/// Recast drops that border and shrinks walkable areas by the agent radius next to the box's
+/// edges. With the neighbouring planes' terrain inside the border, all of that happens outside
+/// the tile, so the navmesh reaches the tile's edges exactly, on the same cell grid as the
+/// neighbour's navmesh: the two meet along the seam and get connected (multi_nav).
+pub(crate) fn build_box(tile: (Vec2, Vec2), height_range: (f32, f32), settings: &NavmeshSettings) -> bevy::shape::Aabb3d {
+    let border = border_width(settings);
+    let margin = settings.agent_height + 1.0;
+    bevy::shape::Aabb3d {
+        min: Vec3::new(tile.0.x - border, height_range.0 - margin, tile.0.y - border).into(),
+        max: Vec3::new(tile.1.x + border, height_range.1 + margin, tile.1.y + border).into(),
+    }
 }
 impl NavmeshGenerationData {
     // pub(crate) fn new(
@@ -225,6 +254,9 @@ impl NavmeshGenerationData {
             water_min_depth: event.water_min_depth.max(0.0),
             terrain_max_water_depth: event.terrain_max_water_depth.map(|d| d.max(0.0)),
             water_heights: Vec::new(),
+            tile: None,
+            height_range: (0.0, 0.0),
+            neighbours: Vec::new(),
         };
 
         return ngd;
@@ -281,6 +313,13 @@ fn on_ready_navmesh(
         // pgn.cleanup_lower();
         pgn.reorder_vertex_polygons();
         pgn.islands_removal();
+        // Island removal can leave nothing (e.g. only a tiny patch of deep water). An empty
+        // navmesh would be saved with infinite bounds (null in JSON) and fail to load.
+        if pgn.polygons.is_empty() {
+            info!("{navmesh_type:?} navmesh for {navname} is empty after island removal; not spawned");
+            nav_state.1 = true;
+            continue;
+        }
         pgn.bake();
         
         commands.spawn(pgn.clone());

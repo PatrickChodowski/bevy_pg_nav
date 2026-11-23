@@ -36,18 +36,47 @@ pub(crate) struct GenerateTerrainNavmesh;
 fn prepare_terrain_colliders(
     _trigger:       On<GenerateTerrainNavmesh>,
     terrains:       Query<(&Transform, &TerrainChunk, &Mesh3d)>,
+    all_terrains:   Query<(Entity, &Transform, &TerrainChunk, &Mesh3d)>,
     objects:        Query<(Entity, &Name, &EditorAsset, &Mesh3d, &GlobalTransform)>,
     meshes:         Res<Assets<Mesh>>,
     mut commands:   Commands,
-    navgendata:     Res<NavmeshGenerationData>,
+    mut navgendata: ResMut<NavmeshGenerationData>,
     navres:         Res<NavResources>,
     overrides:      Res<Assets<NavOverrides>>,
 ){
-    let Ok((_terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
+    let Ok((terrain_transform, terrain, terrain_mesh)) = terrains.get(navgendata.plane_entity) else {return};
     let Some(mesh) = meshes.get(&terrain_mesh.0) else {return};
     info!("[NAV] [prepare_terrain_colliders] Generate terrain navmesh for entity: {}", navgendata.plane_entity);
-    let heightfield = extract_heightfield(&mesh);
-    let heightfield_collider: Collider = Collider::heightfield(heightfield, Vec3::new(terrain.dims.x, 1.0, terrain.dims.y));
+    let heightfield_collider = terrain_collider(mesh, terrain);
+
+    // The plane's tile, and the neighbouring planes within the border Recast leaves out: their
+    // terrain lets the navmesh reach the tile's edges (plugin::build_box).
+    let Some((tile_min, tile_max, mut low, mut high)) = plane_bounds(mesh, terrain_transform) else { return };
+    let border = [&navgendata.terrain_settings, &navgendata.water_settings]
+        .into_iter()
+        .map(|s| crate::plugin::border_width(&s.clone().unwrap_or_default()))
+        .fold(0.0, f32::max)
+        + 0.5;
+    let mut neighbours = Vec::new();
+    for (entity, transform, other, other_mesh) in &all_terrains {
+        if entity == navgendata.plane_entity {
+            continue;
+        }
+        let Some(other_mesh) = meshes.get(&other_mesh.0) else { continue };
+        let Some((lo, hi, l, h)) = plane_bounds(other_mesh, transform) else { continue };
+        let touches = lo.x < tile_max.x + border && hi.x > tile_min.x - border && lo.y < tile_max.y + border && hi.y > tile_min.y - border;
+        if touches {
+            commands.entity(entity).insert((terrain_collider(other_mesh, other), RigidBody::Static));
+            neighbours.push(entity);
+            (low, high) = (low.min(l), high.max(h));
+        }
+    }
+    if !neighbours.is_empty() {
+        info!("[NAV] {} neighbouring plane(s) join this navmesh at the edges", neighbours.len());
+    }
+    navgendata.tile = Some((tile_min, tile_max));
+    navgendata.height_range = (low, high);
+    navgendata.neighbours = neighbours;
 
     // let trimesh = heightfield_collider
     //     .trimesh_builder()
@@ -86,6 +115,22 @@ fn prepare_terrain_colliders(
     // info!("Inserting collider for terrain: {:?}", collider_trimesh);
     commands.entity(navgendata.plane_entity).insert((heightfield_collider, RigidBody::Static));
     commands.insert_resource(WaitColliders::new());
+}
+
+/// A plane's heightfield collider (centred on the plane, like its mesh).
+fn terrain_collider(mesh: &Mesh, terrain: &TerrainChunk) -> Collider {
+    Collider::heightfield(extract_heightfield(mesh), Vec3::new(terrain.dims.x, 1.0, terrain.dims.y))
+}
+
+/// World XZ bounds (min, max) and height range of a plane mesh (planes are unrotated roots).
+fn plane_bounds(mesh: &Mesh, transform: &Transform) -> Option<(Vec2, Vec2, f32, f32)> {
+    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else { return None };
+    let first = transform.translation + Vec3::from(*positions.first()?);
+    let (lo, hi) = positions.iter().fold((first, first), |(lo, hi), p| {
+        let w = transform.translation + Vec3::from(*p);
+        (lo.min(w), hi.max(w))
+    });
+    Some((lo.xz(), hi.xz(), lo.y, hi.y))
 }
 
 #[derive(Resource)]
@@ -147,9 +192,13 @@ fn generate_terrain_navmesh_on_colliders_ready(
         .filter(|(_, s)| s.terrain)
         .map(|(e, _)| e)
         .chain(ceilings.iter())
+        .chain(navgendata.neighbours.iter().copied())
         .collect();
     sources.insert(navgendata.plane_entity);
     settings.filter = Some(sources);
+    if let Some(tile) = navgendata.tile {
+        settings.aabb = Some(crate::plugin::build_box(tile, navgendata.height_range, &settings));
+    }
 
     let navmesh = generator.generate(settings);
     // commands.spawn(DetailNavmeshGizmo::new(&navmesh));

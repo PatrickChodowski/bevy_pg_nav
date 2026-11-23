@@ -36,14 +36,7 @@ fn on_spawn_nav(
             continue;
         }
 
-        let mut poly_pairs: Vec<(u32, u32)> = Vec::new();
-        for (a_poly_index, a_poly) in a_nav.polygons.iter(){
-            for (poly_index, poly) in nav.polygons.iter(){
-                if a_poly.intersects(poly, a_nav, nav){
-                    poly_pairs.push((*a_poly_index, *poly_index));
-                }
-            }
-        }
+        let poly_pairs = polygon_pairs(a_nav, nav);
 
         if poly_pairs.len() > 0 {
             // polygon_pairs are (a_nav polygon, nav polygon): entity1 must be a_entity.
@@ -55,6 +48,77 @@ fn on_spawn_nav(
         }
     }
 
+}
+
+/// XZ bounds of a navmesh triangle.
+fn triangle_bounds(poly: &PGPolygon, nav: &PGNavmesh) -> (Vec2, Vec2) {
+    let [a, b, c] = poly.locs(nav);
+    (a.xz().min(b.xz()).min(c.xz()), a.xz().max(b.xz()).max(c.xz()))
+}
+
+/// Pairs (polygon of `a`, polygon of `b`) whose triangles overlap or touch: where the two
+/// navmeshes connect. Only triangles in the strip where the navmeshes' bounds overlap can
+/// touch, and those are bucketed on a grid, so neighbouring map tiles with tens of thousands
+/// of polygons each cost only their seam, not every pair (which froze the game).
+pub(crate) fn polygon_pairs(a: &PGNavmesh, b: &PGNavmesh) -> Vec<(u32, u32)> {
+    const EPS: f32 = 0.01;
+    let bounds = |nav: &PGNavmesh| -> Vec<(u32, Vec2, Vec2)> {
+        nav.polygons.iter().map(|(id, p)| { let (lo, hi) = triangle_bounds(p, nav); (*id, lo, hi) }).collect()
+    };
+    let (ba, bb) = (bounds(a), bounds(b));
+    let extent = |v: &[(u32, Vec2, Vec2)]| v.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), (_, l, h)| (lo.min(*l), hi.max(*h)));
+    let ((alo, ahi), (blo, bhi)) = (extent(&ba), extent(&bb));
+    let (lo, hi) = (alo.max(blo) - EPS, ahi.min(bhi) + EPS);
+    if lo.x > hi.x || lo.y > hi.y {
+        return Vec::new(); // the navmeshes don't touch
+    }
+    let touches = |l: Vec2, h: Vec2, lo: Vec2, hi: Vec2| l.x <= hi.x && h.x >= lo.x && l.y <= hi.y && h.y >= lo.y;
+    let ca: Vec<_> = ba.into_iter().filter(|(_, l, h)| touches(*l, *h, lo, hi)).collect();
+    let cb: Vec<_> = bb.into_iter().filter(|(_, l, h)| touches(*l, *h, lo, hi)).collect();
+    if ca.is_empty() || cb.is_empty() {
+        return Vec::new();
+    }
+
+    // Grid over the overlap, cells about the size of a candidate triangle.
+    let mean = cb.iter().map(|(_, l, h)| (*h - *l).max_element()).sum::<f32>() / cb.len() as f32;
+    let cell = mean.max(0.05);
+    let size = hi - lo;
+    let (cols, rows) = (((size.x / cell).ceil() as usize).clamp(1, 4096), ((size.y / cell).ceil() as usize).clamp(1, 4096));
+    let to_cell = |p: Vec2| {
+        let g = ((p - lo) / size.max(Vec2::splat(1e-6)) * Vec2::new(cols as f32, rows as f32)).floor();
+        (g.x.clamp(0.0, (cols - 1) as f32) as usize, g.y.clamp(0.0, (rows - 1) as f32) as usize)
+    };
+    let mut grid: Vec<Vec<usize>> = vec![Vec::new(); cols * rows];
+    for (k, (_, l, h)) in cb.iter().enumerate() {
+        let ((c0, r0), (c1, r1)) = (to_cell(*l - EPS), to_cell(*h + EPS));
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                grid[r * cols + c].push(k);
+            }
+        }
+    }
+
+    let mut pairs = Vec::new();
+    let mut seen = vec![usize::MAX; cb.len()];
+    for (i, (a_id, l, h)) in ca.iter().enumerate() {
+        let a_poly = &a.polygons[a_id];
+        let ((c0, r0), (c1, r1)) = (to_cell(*l - EPS), to_cell(*h + EPS));
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                for &k in &grid[r * cols + c] {
+                    if seen[k] == i {
+                        continue; // already tested from another cell
+                    }
+                    seen[k] = i;
+                    let (b_id, bl, bh) = &cb[k];
+                    if touches(*l - EPS, *h + EPS, *bl, *bh) && a_poly.touches(&b.polygons[b_id], a, b, EPS) {
+                        pairs.push((*a_id, *b_id));
+                    }
+                }
+            }
+        }
+    }
+    pairs
 }
 
 fn on_despawn_nav(
@@ -321,3 +385,70 @@ pub (crate) fn search_navs_path(
 
     None
 }
+
+
+#[cfg(test)]
+mod pair_tests {
+    use super::*;
+    use crate::types::PGVertex;
+    use bevy::platform::collections::HashSet;
+
+    /// A navmesh of 2 triangles per cell over `cells` x `cells` unit cells starting at `x0`.
+    fn grid_nav(x0: f32, cells: u32) -> PGNavmesh {
+        let mut nav = PGNavmesh::default();
+        let n = cells + 1;
+        for j in 0..n {
+            for i in 0..n {
+                let id = j * n + i;
+                nav.vertices.insert(id, PGVertex { index: id, loc: Vec3::new(x0 + i as f32, 0.0, j as f32), polygons: vec![] });
+            }
+        }
+        let mut id = 0;
+        for j in 0..cells {
+            for i in 0..cells {
+                let v = j * n + i;
+                for tri in [[v, v + n, v + 1], [v + 1, v + n, v + n + 1]] {
+                    nav.polygons.insert(id, PGPolygon { index: id, vertices: tri.to_vec(), neighbours: HashSet::new() });
+                    id += 1;
+                }
+            }
+        }
+        nav
+    }
+
+    fn brute(a: &PGNavmesh, b: &PGNavmesh) -> Vec<(u32, u32)> {
+        let mut out = vec![];
+        for (ia, pa) in &a.polygons {
+            for (ib, pb) in &b.polygons {
+                if pa.touches(pb, a, b, 0.01) { out.push((*ia, *ib)); }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn seam_pairs_match_the_brute_force_ones() {
+        let (a, b) = (grid_nav(0.0, 6), grid_nav(6.0, 6)); // edge to edge at x = 6
+        let mut fast = polygon_pairs(&a, &b);
+        fast.sort();
+        let slow = brute(&a, &b);
+        assert!(!slow.is_empty());
+        assert_eq!(fast, slow);
+    }
+
+    #[test]
+    fn a_rounding_gap_along_the_seam_still_connects() {
+        let (a, b) = (grid_nav(0.0, 4), grid_nav(4.00001, 4));
+        assert!(!polygon_pairs(&a, &b).is_empty());
+        assert!(polygon_pairs(&a, &grid_nav(4.5, 4)).is_empty(), "a real gap doesn't");
+    }
+
+    #[test]
+    fn far_apart_navmeshes_have_no_pairs() {
+        assert!(polygon_pairs(&grid_nav(0.0, 3), &grid_nav(10.0, 3)).is_empty());
+    }
+}
+
+
+
