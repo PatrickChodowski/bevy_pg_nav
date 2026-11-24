@@ -182,7 +182,8 @@ impl PGNavmesh {
         end:          &Vec2,
         agent_radius: f32
     ) -> Option<(Path, u32, u32)> {
-        let start_polygon: &PGPolygon = self.has_point(start).map(|p| p.0).unwrap();
+        // Off the navmesh (e.g. it hasn't loaded around the start yet): no path, like the end.
+        let Some(start_polygon) = self.has_point(start).map(|p| p.0) else {return None};
         let Some(end_polygon) = self.has_point(end).map(|p| p.0) else {return None};
         return self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
     }
