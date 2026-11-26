@@ -50,6 +50,13 @@ fn on_spawn_nav(
 
 }
 
+/// How far apart (world units) neighbouring navmeshes' triangles may be and still connect. The
+/// navmeshes of neighbouring map tiles don't always meet: the bake can lose a sample cell along a
+/// tile's edge (1.33 for water, 0.6 for terrain), leaving a strip of nothing between them that
+/// no boat or walker would cross. Within this, they connect, and a move across jumps the strip
+/// (multi_nav_clamp_move).
+pub const SEAM_GAP: f32 = 1.5;
+
 /// XZ bounds of a navmesh triangle.
 fn triangle_bounds(poly: &PGPolygon, nav: &PGNavmesh) -> (Vec2, Vec2) {
     let [a, b, c] = poly.locs(nav);
@@ -61,7 +68,8 @@ fn triangle_bounds(poly: &PGPolygon, nav: &PGNavmesh) -> (Vec2, Vec2) {
 /// touch, and those are bucketed on a grid, so neighbouring map tiles with tens of thousands
 /// of polygons each cost only their seam, not every pair (which froze the game).
 pub(crate) fn polygon_pairs(a: &PGNavmesh, b: &PGNavmesh) -> Vec<(u32, u32)> {
-    const EPS: f32 = 0.01;
+    // Touching, or within the seam gap.
+    const EPS: f32 = SEAM_GAP;
     let bounds = |nav: &PGNavmesh| -> Vec<(u32, Vec2, Vec2)> {
         nav.polygons.iter().map(|(id, p)| { let (lo, hi) = triangle_bounds(p, nav); (*id, lo, hi) }).collect()
     };
@@ -242,12 +250,18 @@ pub fn multi_nav_clamp_move(
     let mut closest_poly_index: u32 = current_polygon_id;
     let mut closest_point_navmesh_entity = current_nav_entity;
 
-    // Search for the nearest point across all candidates
+    // Search for the nearest point across all candidates. Another navmesh's polygon counts as
+    // the seam gap nearer (SEAM_GAP): a move into the strip between two tiles' navmeshes goes
+    // on across it (ties keep the current navmesh: candidates of this one come first).
     for (candidate_nav_entity, candidate_nav, candidate_polygon_id) in &candidates {
         let candidate_polygon = candidate_nav.polygon(&candidate_polygon_id);
         let [a, b, c] = candidate_polygon.locs_2d(candidate_nav);
         let clamped_2d = closest_point_on_triangle_2d(target, a,b,c);
-        let dist_sq = clamped_2d.distance_squared(target);
+        let mut dist = clamped_2d.distance(target);
+        if *candidate_nav_entity != current_nav_entity {
+            dist = (dist - SEAM_GAP).max(0.0);
+        }
+        let dist_sq = dist * dist;
         if dist_sq < min_dist_sq {
             min_dist_sq = dist_sq;
             closest_point = clamped_2d;
@@ -420,7 +434,7 @@ mod pair_tests {
         let mut out = vec![];
         for (ia, pa) in &a.polygons {
             for (ib, pb) in &b.polygons {
-                if pa.touches(pb, a, b, 0.01) { out.push((*ia, *ib)); }
+                if pa.touches(pb, a, b, SEAM_GAP) { out.push((*ia, *ib)); }
             }
         }
         out.sort();
@@ -438,10 +452,52 @@ mod pair_tests {
     }
 
     #[test]
-    fn a_rounding_gap_along_the_seam_still_connects() {
-        let (a, b) = (grid_nav(0.0, 4), grid_nav(4.00001, 4));
-        assert!(!polygon_pairs(&a, &b).is_empty());
-        assert!(polygon_pairs(&a, &grid_nav(4.5, 4)).is_empty(), "a real gap doesn't");
+    fn a_gap_along_the_seam_still_connects() {
+        let a = grid_nav(0.0, 4);
+        assert!(!polygon_pairs(&a, &grid_nav(4.00001, 4)).is_empty(), "rounding");
+        // The bake's lost cell along a tile edge (water: 1.33).
+        assert!(!polygon_pairs(&a, &grid_nav(4.0 + 1.33, 4)).is_empty(), "a lost sample cell");
+        assert!(polygon_pairs(&a, &grid_nav(4.0 + 2.0, 4)).is_empty(), "a real gap doesn't");
+    }
+
+    /// West of Bergen (north_europe_11_9 into the open sea of 10_9): 11_9's water navmesh stops
+    /// 1.33 short of the tile edge at x = 4400, where 10_9's starts. A boat at 11_9's edge
+    /// steering west goes on into 10_9, and back. (Skipped without the game's maps.)
+    #[test]
+    fn a_boat_crosses_the_seam_west_of_bergen() {
+        use bevy::ecs::system::RunSystemOnce;
+        let load = |name: &str| -> Option<PGNavmesh> {
+            let path = format!("../doomhalla/assets/game_map/{name}/navmesh/{name}_water.nav.json");
+            serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+        };
+        let (Some(mut east), Some(mut west)) = (load("north_europe_11_9"), load("north_europe_10_9")) else { return };
+        let mut world = World::new();
+        let (e, w) = (world.spawn_empty().id(), world.spawn_empty().id());
+        let pairs = polygon_pairs(&east, &west);
+        assert!(!pairs.is_empty(), "the tiles connect");
+        east.conns.insert(w, pairs.clone());
+        west.conns.insert(e, pairs.iter().map(|&(a, b)| (b, a)).collect());
+        world.entity_mut(e).insert(east);
+        world.entity_mut(w).insert(west);
+        world.run_system_once(move |navs: Query<(Entity, &PGNavmesh)>| {
+            let (_, east) = navs.get(e).unwrap();
+            let start = Vec2::new(4401.8, 3875.0);
+            let (poly, _) = east.has_point(&start).expect("on 11_9's water");
+            // A few steps west (a boat moves ~0.3 a frame).
+            let (mut nav, mut at, mut poly) = (e, start, poly.index);
+            for _ in 0..12 {
+                let (n, p, pid) = multi_nav_clamp_move(nav, poly, at - Vec2::new(0.3, 0.0), &navs);
+                (nav, at, poly) = (n, p.xz(), pid);
+            }
+            assert_eq!(nav, w, "crossed into 10_9, at {at}");
+            assert!(at.x < 4399.0, "and on west: {at}");
+            // And back east.
+            for _ in 0..12 {
+                let (n, p, pid) = multi_nav_clamp_move(nav, poly, at + Vec2::new(0.3, 0.0), &navs);
+                (nav, at, poly) = (n, p.xz(), pid);
+            }
+            assert_eq!(nav, e, "back into 11_9, at {at}");
+        }).unwrap();
     }
 
     #[test]
