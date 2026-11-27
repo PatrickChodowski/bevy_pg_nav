@@ -630,16 +630,50 @@ impl PGNavmesh {
         agent_types: &Vec<PGNavmeshType>
     )  -> Option<(Path, u32, u32)> {
 
-        if let Some(nav_path) = search_navs_path(start_nav_entity, end_nav_entity, navs, agent_types){
+        /// Crossings tried per seam (nearest first along the way) before giving up: the nearest
+        /// one may be in water/land not connected to where the agent is (a lake, a fjord).
+        const CROSSINGS_TRIED: usize = 6;
 
+        let _ = end_nav_entity;
+        let chain = search_navs_path(start_nav_entity, end_nav_entity, navs, agent_types)?;
+        let start_poly = self.has_point(start)?.0.index;
+        let end_poly = end_nav.has_point(end)?.0.index;
 
-            // self.path_between_polygons(start, end, start_polygon.index, end_polygon.index, agent_radius);
+        // Navmesh by navmesh along the chain: to a crossing into the next one (a pair of
+        // polygons touching across the seam, centre to centre), then on from there.
+        let mut nav: &PGNavmesh = self;
+        let mut from = *start;
+        let mut from_poly = start_poly;
+        let mut way = Path { length: 0.0, path: Default::default() };
 
+        for (next_entity, pairs) in chain.iter().skip(1) {
+            let Ok((_, next_nav)) = navs.get(*next_entity) else { return None };
+            // Where the two polygons meet (their centres can be far from the seam: open water's
+            // triangles are big, and a way through them turned boats back at the seam): the
+            // point of the next one nearest to here, and the point of this one nearest to that,
+            // each just inside its triangle.
+            let mut crossings: Vec<(u32, u32, Vec2, Vec2, f32)> = pairs.iter().map(|&(a, b)| {
+                let pb = seam_point(next_nav.polygon(&b), next_nav, from);
+                let pa = seam_point(nav.polygon(&a), nav, pb);
+                (a, b, pa, pb, from.distance(pa) + pb.distance(*end))
+            }).collect();
+            crossings.sort_by(|x, y| x.4.total_cmp(&y.4));
 
+            let (a, b, pa, pb, mut leg) = crossings.into_iter().take(CROSSINGS_TRIED).find_map(|(a, b, pa, pb, _)| {
+                nav.path_between_polygons(&from, &pa, from_poly, a, agent_radius).map(|leg| (a, b, pa, pb, leg.0))
+            })?;
+            let _ = a;
+            way.add(&mut leg);
+            way.length += pa.distance(pb);
+            way.path.push(pb);
+            nav = next_nav;
+            from = pb;
+            from_poly = b;
         }
 
-
-        return None;
+        let (mut leg, _, _) = nav.path_between_polygons(&from, end, from_poly, end_poly, agent_radius)?;
+        way.add(&mut leg);
+        return Some((way, start_poly, end_poly));
     }
 
     
@@ -647,6 +681,15 @@ impl PGNavmesh {
 
 }
 
+
+/// The point of `poly` nearest `p`, moved just inside it (towards its centre).
+fn seam_point(poly: &PGPolygon, nav: &PGNavmesh, p: Vec2) -> Vec2 {
+    let [a, b, c] = poly.locs_2d(nav);
+    let q = closest_point_on_triangle_2d(p, a, b, c);
+    let centre = (a + b + c) / 3.0;
+    let inward = ((centre - q).length() * 0.5).min(0.25);
+    q + (centre - q).normalize_or_zero() * inward
+}
 
 // Search for the point in query of navmeshes
 pub fn find_point<'a>(
